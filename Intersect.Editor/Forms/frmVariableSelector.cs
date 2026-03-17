@@ -1,3 +1,5 @@
+using Eto.Forms;
+using Eto.Drawing;
 using Intersect.Editor.Core;
 using Intersect.Editor.Localization;
 using Intersect.Enums;
@@ -6,97 +8,101 @@ using Intersect.Framework.Core.GameObjects.Events;
 
 namespace Intersect.Editor.Forms;
 
-public partial class FrmVariableSelector : Form
+public class FrmVariableSelector : Dialog<bool>
 {
-    private Guid mSelectedVariableId { get; set; }
+    private Guid mSelectedVariableId;
+    private VariableType mSelectedVariableType;
+    private bool mResult;
+    private bool mPopulating;
+    private VariableDataType mFilterType;
+    private VariableSelection mSelection;
 
-    private VariableType mSelectedVariableType { get; set; }
-
-    private bool mResult { get; set; }
-
-    private bool mPopulating { get; set; }
-
-    private VariableDataType mFilterType { get; set; }
-
-    private VariableSelection mSelection { get; set; }
+    private DropDown cmbVariableType;
+    private DropDown cmbVariables;
+    private GroupBox grpSelection;
+    private GroupBox grpVariableType;
+    private GroupBox grpVariable;
+    private Button btnOk;
+    private Button btnCancel;
 
     public FrmVariableSelector(VariableType variableType, Guid variableId, VariableDataType filterType)
     {
-        PreInit();
-
         mSelectedVariableId = variableId;
         mSelectedVariableType = variableType;
         mFilterType = filterType;
-
-        PostInit();
+        InitializeControls();
+        PopulateForm();
     }
 
     public FrmVariableSelector()
     {
-        PreInit();
-        PostInit();
-    }
-
-    private void PreInit()
-    {
-        InitializeComponent();
-    }
-
-    private void PostInit()
-    {
-        mPopulating = true;
-        Icon = Program.Icon;
-
-        InitLocalization();
-
+        InitializeControls();
         PopulateForm();
     }
 
-    private void InitLocalization()
+    private void InitializeControls()
     {
-        Text = Strings.VariableSelector.Title;
+        Title = Strings.VariableSelector.Title;
+        MinimumSize = new Size(400, 300);
+        Resizable = true;
 
-        grpSelection.Text = Strings.VariableSelector.LabelGroup;
-        grpVariableType.Text = Strings.VariableSelector.LabelVariableType;
-        grpVariable.Text = Strings.VariableSelector.LabelVariableValue;
+        cmbVariableType = new DropDown();
+        cmbVariableType.SelectedIndexChanged += CmbVariableType_SelectedIndexChanged;
 
-        btnOk.Text = Strings.General.Okay;
-        btnCancel.Text = Strings.General.Cancel;
+        cmbVariables = new DropDown();
+        cmbVariables.SelectedIndexChanged += CmbVariables_SelectedIndexChanged;
 
-        cmbVariableType.Items.Clear();
+        grpVariableType = new GroupBox { Text = Strings.VariableSelector.LabelVariableType, Content = cmbVariableType };
+        grpVariable = new GroupBox { Text = Strings.VariableSelector.LabelVariableValue, Content = cmbVariables };
+        grpSelection = new GroupBox { Text = Strings.VariableSelector.LabelGroup };
 
-        cmbVariableType.Items.AddRange(Strings.VariableSelector.VariableTypes.Values.ToArray());
+        btnOk = new Button { Text = Strings.General.Okay };
+        btnOk.Click += BtnOk_Click;
+        btnCancel = new Button { Text = Strings.General.Cancel };
+        btnCancel.Click += (s, e) => Close();
+
+        foreach (var varType in Strings.VariableSelector.VariableTypes.Values)
+        {
+            cmbVariableType.Items.Add(new ListItem { Text = varType });
+        }
+
+        var layout = new DynamicLayout { Padding = 10, DefaultSpacing = new Size(5, 5) };
+        layout.AddRow(grpVariableType);
+        layout.AddRow(grpVariable);
+        layout.AddRow(grpSelection);
+        layout.AddRow(null, btnOk, btnCancel);
+
+        Content = layout;
+
+        PositiveButtons.Add(btnOk);
+        NegativeButtons.Add(btnCancel);
     }
 
     private void PopulateForm()
     {
+        mPopulating = true;
         cmbVariableType.SelectedIndex = (int)mSelectedVariableType;
-
         ReloadVariablesOf(mSelectedVariableType);
-
         cmbVariables.SelectedIndex = mSelectedVariableType.GetRelatedTable().ListIndex(mSelectedVariableId, mFilterType);
-
         mPopulating = false;
     }
 
     private void ReloadVariablesOf(VariableType type)
     {
         cmbVariables.Items.Clear();
-
-        cmbVariables.Items.AddRange(type.GetRelatedTable().Names(mFilterType));
+        foreach (var name in type.GetRelatedTable().Names(mFilterType))
+        {
+            cmbVariables.Items.Add(new ListItem { Text = name });
+        }
     }
 
-    private void cmbVariableType_SelectedIndexChanged(object sender, EventArgs e)
+    private void CmbVariableType_SelectedIndexChanged(object? sender, EventArgs e)
     {
-        if (mPopulating)
-        {
-            return;
-        }
+        if (mPopulating) return;
 
         mSelectedVariableType = (VariableType)cmbVariableType.SelectedIndex;
         ReloadVariablesOf(mSelectedVariableType);
 
-        // Force reset the variable selection
         if (cmbVariables.Items.Count > 0)
         {
             cmbVariables.SelectedIndex = 0;
@@ -109,37 +115,21 @@ public partial class FrmVariableSelector : Form
         }
     }
 
-    public bool GetResult()
+    private void CmbVariables_SelectedIndexChanged(object? sender, EventArgs e)
     {
-        return mResult;
+        if (mPopulating) return;
+        mSelectedVariableId = mSelectedVariableType.GetRelatedTable().IdFromList(cmbVariables.SelectedIndex, mFilterType);
     }
 
-    public VariableSelection GetSelection()
-    {
-        return mSelection;
-    }
-
-    private void btnOk_Click(object sender, EventArgs e)
+    private void BtnOk_Click(object? sender, EventArgs e)
     {
         mResult = true;
         mSelection = new VariableSelection(mSelectedVariableType, mSelectedVariableId);
         Close();
     }
 
-    private void btnCancel_Click(object sender, EventArgs e)
-    {
-        Close();
-    }
-
-    private void cmbVariables_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        if (mPopulating)
-        {
-            return;
-        }
-
-        mSelectedVariableId = mSelectedVariableType.GetRelatedTable().IdFromList(cmbVariables.SelectedIndex, mFilterType);
-    }
+    public bool GetResult() => mResult;
+    public VariableSelection GetSelection() => mSelection;
 }
 
 public class VariableSelection
@@ -151,6 +141,5 @@ public class VariableSelection
     }
 
     public VariableType VariableType { get; set; }
-
     public Guid VariableId { get; set; }
 }

@@ -1,129 +1,132 @@
-﻿using Timer = System.Windows.Forms.Timer;
+using Eto.Forms;
+using Eto.Drawing;
 
 namespace Intersect.Editor.Forms.Controls;
 
-
 public partial class AutoDragPanel : Panel
 {
-
-    private Timer mDragTimer;
-
+    private UITimer mDragTimer;
     private int mMaxDragChange = 2;
+    private bool mIsDragging;
+    private PointF mLastMousePosition;
 
     public AutoDragPanel()
     {
-        InitializeComponent();
-        mDragTimer = new Timer()
+        mDragTimer = new UITimer
         {
-            Interval = 1
+            Interval = 0.001
         };
 
-        mDragTimer.Tick += DragTimer_Tick;
+        mDragTimer.Elapsed += DragTimer_Tick;
+
         MouseDown += AutoDragPanel_MouseDown;
         MouseUp += AutoDragPanel_MouseUp;
+        MouseMove += AutoDragPanel_MouseMove;
     }
 
-    public void AutoDragPanel_MouseUp(object sender, MouseEventArgs e)
+    public int MaxDragChange
     {
-        mDragTimer.Enabled = false;
+        get => mMaxDragChange;
+        set => mMaxDragChange = value;
     }
 
-    public void AutoDragPanel_MouseDown(object sender, MouseEventArgs e)
+    private void AutoDragPanel_MouseDown(object sender, MouseEventArgs e)
     {
-        if (e.Button == MouseButtons.Left)
+        if (e.Buttons == MouseButtons.Primary)
         {
-            mDragTimer.Enabled = true;
+            mIsDragging = true;
+            mLastMousePosition = e.Location;
+            mDragTimer.Start();
+        }
+    }
+
+    private void AutoDragPanel_MouseUp(object sender, MouseEventArgs e)
+    {
+        mIsDragging = false;
+        mDragTimer.Stop();
+    }
+
+    private void AutoDragPanel_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (mIsDragging)
+        {
+            mLastMousePosition = e.Location;
         }
     }
 
     private void DragTimer_Tick(object sender, EventArgs e)
     {
-        var pos = PointToClient(MousePosition);
-
-        var right = ClientRectangle.Right;
-        var bottom = ClientRectangle.Bottom;
-
-        if (VerticalScroll.Visible)
+        if (!mIsDragging)
         {
-            right = Width - SystemInformation.VerticalScrollBarWidth;
+            return;
         }
 
-        if (HorizontalScroll.Visible)
+        var pos = mLastMousePosition;
+
+        var right = (float)Width;
+        var bottom = (float)Height;
+
+        var scrollable = this as IScrollable;
+        if (scrollable != null)
         {
-            bottom = Height - SystemInformation.HorizontalScrollBarHeight;
-        }
+            var scrollPosition = scrollable.ScrollPosition;
 
-        if (VerticalScroll.Visible)
-        {
-            // Scroll up
-            if (pos.Y < ClientRectangle.Top)
+            // Vertical scroll
+            if (pos.Y < 0)
             {
-                var difference = (pos.Y - ClientRectangle.Top) * -1;
-
+                var difference = (int)(-pos.Y);
                 if (mMaxDragChange > 0 && difference > mMaxDragChange)
                 {
                     difference = mMaxDragChange;
                 }
 
-                if (VerticalScroll.Value < difference)
-                {
-                    VerticalScroll.Value = 0;
-                }
-                else
-                {
-                    VerticalScroll.Value = VerticalScroll.Value - difference;
-                }
+                scrollPosition = new Point(scrollPosition.X, Math.Max(0, scrollPosition.Y - difference));
             }
-
-            // Scroll down
-            if (pos.Y > bottom)
+            else if (pos.Y > bottom)
             {
-                var difference = pos.Y - bottom;
-
+                var difference = (int)(pos.Y - bottom);
                 if (mMaxDragChange > 0 && difference > mMaxDragChange)
                 {
                     difference = mMaxDragChange;
                 }
 
-                VerticalScroll.Value = VerticalScroll.Value + difference;
+                scrollPosition = new Point(scrollPosition.X, scrollPosition.Y + difference);
             }
-        }
 
-        if (HorizontalScroll.Visible)
-        {
-            // Scroll left
-            if (pos.X < ClientRectangle.Left)
+            // Horizontal scroll
+            if (pos.X < 0)
             {
-                var difference = (pos.X - ClientRectangle.Left) * -1;
-
+                var difference = (int)(-pos.X);
                 if (mMaxDragChange > 0 && difference > mMaxDragChange)
                 {
                     difference = mMaxDragChange;
                 }
 
-                if (HorizontalScroll.Value < difference)
-                {
-                    HorizontalScroll.Value = 0;
-                }
-                else
-                {
-                    HorizontalScroll.Value = HorizontalScroll.Value - difference;
-                }
+                scrollPosition = new Point(Math.Max(0, scrollPosition.X - difference), scrollPosition.Y);
             }
-
-            // Scroll right
-            if (pos.X > right)
+            else if (pos.X > right)
             {
-                var difference = pos.X - right;
-
+                var difference = (int)(pos.X - right);
                 if (mMaxDragChange > 0 && difference > mMaxDragChange)
                 {
                     difference = mMaxDragChange;
                 }
 
-                HorizontalScroll.Value = HorizontalScroll.Value + difference;
+                scrollPosition = new Point(scrollPosition.X + difference, scrollPosition.Y);
             }
+
+            scrollable.ScrollPosition = scrollPosition;
         }
     }
 
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            mDragTimer?.Stop();
+            mDragTimer?.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
 }

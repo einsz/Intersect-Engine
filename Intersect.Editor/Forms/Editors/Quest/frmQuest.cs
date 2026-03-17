@@ -1,6 +1,7 @@
-using DarkUI.Forms;
+using Intersect.Editor.Forms.Helpers;
+using Eto.Forms;
+using Eto.Drawing;
 using Intersect.Editor.Core;
-using Intersect.Editor.Forms.Editors.Events;
 using Intersect.Editor.General;
 using Intersect.Editor.Localization;
 using Intersect.Editor.Networking;
@@ -9,92 +10,357 @@ using Intersect.Framework.Core.GameObjects.Events;
 using Intersect.GameObjects;
 using Microsoft.Extensions.Logging;
 
-
 namespace Intersect.Editor.Forms.Editors.Quest;
-
 
 public partial class FrmQuest : EditorForm
 {
+    private List<QuestDescriptor> mChanged = new();
+    private string? mCopiedItem;
+    private QuestDescriptor? mEditorItem;
+    private List<string> mKnownFolders = new();
 
-    private List<QuestDescriptor> mChanged = new List<QuestDescriptor>();
-
-    private string mCopiedItem;
-
-    private QuestDescriptor mEditorItem;
-
-    private List<string> mKnownFolders = new List<string>();
+    protected ListBox? lstGameObjects;
+    protected ListBox? lstTasks;
+    protected TextBox? txtName;
+    protected TextArea? txtBeforeDesc;
+    protected TextArea? txtStartDesc;
+    protected TextArea? txtInProgressDesc;
+    protected TextArea? txtEndDesc;
+    protected TextBox? txtSearch;
+    protected DropDown? cmbFolder;
+    protected DropDown? cmbUnstartedCategory;
+    protected DropDown? cmbInProgressCategory;
+    protected DropDown? cmbCompletedCategory;
+    protected NumericStepper? nudOrderValue;
+    protected CheckBox? chkRepeatable;
+    protected CheckBox? chkQuittable;
+    protected CheckBox? chkLogBeforeOffer;
+    protected CheckBox? chkLogAfterComplete;
+    protected CheckBox? chkDoNotShowUnlessReqsMet;
+    protected CheckBox? btnAlphabetical;
+    protected Button? btnSave;
+    protected Button? btnCancel;
+    protected Button? btnEditRequirements;
+    protected Button? btnEditStartEvent;
+    protected Button? btnEditCompletionEvent;
+    protected Button? btnAddTask;
+    protected Button? btnRemoveTask;
+    protected Button? btnShiftTaskUp;
+    protected Button? btnShiftTaskDown;
+    protected Button? btnAddFolder;
+    protected Button? btnClearSearch;
+    protected GroupBox? grpQuests;
+    protected GroupBox? grpGeneral;
+    protected GroupBox? grpLogOptions;
+    protected GroupBox? grpProgessionOptions;
+    protected GroupBox? grpQuestReqs;
+    protected GroupBox? grpQuestTasks;
+    protected GroupBox? grpActions;
+    protected Panel? pnlContainer;
+    protected Label? lblName;
+    protected Label? lblBeforeOffer;
+    protected Label? lblOffer;
+    protected Label? lblInProgress;
+    protected Label? lblCompleted;
+    protected Label? lblOnStart;
+    protected Label? lblOnEnd;
+    protected Label? lblUnstartedCategory;
+    protected Label? lblInProgressCategory;
+    protected Label? lblCompletedCategory;
+    protected Label? lblSortOrder;
+    protected Label? lblFolder;
 
     public FrmQuest()
     {
         ApplyHooks();
-        InitializeComponent();
-        Icon = Program.Icon;
-
+        BuildUI();
         InitLocalization();
+    }
+
+    private void BuildUI()
+    {
+        Title = Strings.QuestEditor.title;
+        MinimumSize = new Size(1024, 768);
+
+        var mainSplitter = new Splitter
+        {
+            Orientation = Orientation.Horizontal,
+            Position = 250,
+            Panel1 = BuildLeftPanel(),
+            Panel2 = BuildRightPanel()
+        };
+
+        Content = mainSplitter;
+    }
+
+    private Panel BuildLeftPanel()
+    {
+        lstGameObjects = new ListBox();
+        txtSearch = new TextBox { PlaceholderText = Strings.QuestEditor.searchplaceholder };
+        btnAlphabetical = new CheckBox { Text = "A-Z" };
+        cmbFolder = new DropDown();
+        btnAddFolder = new Button { Text = "+" };
+        btnClearSearch = new Button { Text = "X" };
+        lblFolder = new Label { Text = Strings.QuestEditor.folderlabel };
+
+        var searchPanel = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Items = { txtSearch, btnClearSearch, btnAlphabetical }
+        };
+
+        var folderPanel = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Items = { lblFolder, cmbFolder, btnAddFolder }
+        };
+
+        return new Panel
+        {
+            Content = new StackLayout
+            {
+                Padding = new Padding(5),
+                Spacing = 5,
+                Items = { searchPanel, folderPanel, lstGameObjects }
+            }
+        };
+    }
+
+    private Panel BuildRightPanel()
+    {
+        pnlContainer = new Panel();
+        BuildEditorControls();
+
+        var topButtons = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 5,
+            Items =
+            {
+                new Button { Text = Strings.QuestEditor.New },
+                new Button { Text = Strings.QuestEditor.delete },
+                new Button { Text = Strings.QuestEditor.copy },
+                new Button { Text = Strings.QuestEditor.paste },
+                new Button { Text = Strings.QuestEditor.undo }
+            }
+        };
+
+        btnSave = new Button { Text = Strings.QuestEditor.save };
+        btnCancel = new Button { Text = Strings.QuestEditor.cancel };
         _btnSave = btnSave;
         _btnCancel = btnCancel;
 
-        lstGameObjects.Init(UpdateToolStripItems, AssignEditorItem, toolStripItemNew_Click, toolStripItemCopy_Click, toolStripItemUndo_Click, toolStripItemPaste_Click, toolStripItemDelete_Click);
+        var bottomButtons = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 5,
+            Items = { btnSave, btnCancel }
+        };
 
-        UpdateEditor();
+        return new Panel
+        {
+            Content = new StackLayout
+            {
+                Padding = new Padding(5),
+                Spacing = 5,
+                Items = { topButtons, pnlContainer, bottomButtons }
+            }
+        };
     }
-    private void AssignEditorItem(Guid id)
+
+    private void BuildEditorControls()
     {
-        mEditorItem = QuestDescriptor.Get(id);
-        UpdateEditor();
+        txtName = new TextBox();
+        txtBeforeDesc = new TextArea();
+        txtStartDesc = new TextArea();
+        txtInProgressDesc = new TextArea();
+        txtEndDesc = new TextArea();
+
+        cmbUnstartedCategory = new DropDown();
+        cmbInProgressCategory = new DropDown();
+        cmbCompletedCategory = new DropDown();
+
+        nudOrderValue = new NumericStepper { MinValue = int.MinValue, MaxValue = int.MaxValue };
+
+        chkRepeatable = new CheckBox { Text = Strings.QuestEditor.repeatable };
+        chkQuittable = new CheckBox { Text = Strings.QuestEditor.quit };
+        chkLogBeforeOffer = new CheckBox { Text = Strings.QuestEditor.showbefore };
+        chkLogAfterComplete = new CheckBox { Text = Strings.QuestEditor.showafter };
+        chkDoNotShowUnlessReqsMet = new CheckBox { Text = Strings.QuestEditor.donotshowunlessreqsmet };
+
+        lstTasks = new ListBox();
+
+        btnEditRequirements = new Button { Text = Strings.QuestEditor.editrequirements };
+        btnEditStartEvent = new Button { Text = Strings.QuestEditor.editstartevent };
+        btnEditCompletionEvent = new Button { Text = Strings.QuestEditor.editendevent };
+        btnAddTask = new Button { Text = Strings.QuestEditor.addtask };
+        btnRemoveTask = new Button { Text = Strings.QuestEditor.removetask };
+        btnShiftTaskUp = new Button { Text = "^" };
+        btnShiftTaskDown = new Button { Text = "v" };
+
+        grpQuests = new GroupBox { Text = Strings.QuestEditor.quests };
+        grpGeneral = new GroupBox { Text = Strings.QuestEditor.general };
+        grpLogOptions = new GroupBox { Text = Strings.QuestEditor.logoptions };
+        grpProgessionOptions = new GroupBox { Text = Strings.QuestEditor.options };
+        grpQuestReqs = new GroupBox { Text = Strings.QuestEditor.requirements };
+        grpQuestTasks = new GroupBox { Text = Strings.QuestEditor.tasks };
+        grpActions = new GroupBox { Text = Strings.QuestEditor.actions };
+
+        pnlContainer = new Panel();
+
+        SetupEventHandlers();
+    }
+
+    private void SetupEventHandlers()
+    {
+        txtName!.TextChanged += (s, e) =>
+        {
+            if (mEditorItem != null)
+            {
+                mEditorItem.Name = txtName.Text;
+
+                if (mEditorItem.StartEvent != null)
+                {
+                    mEditorItem.StartEvent.Name = Strings.QuestEditor.startevent.ToString(mEditorItem.Name);
+                }
+
+                if (mEditorItem.EndEvent != null)
+                {
+                    mEditorItem.EndEvent.Name = Strings.QuestEditor.endevent.ToString(mEditorItem.Name);
+                }
+            }
+        };
+
+        if (chkRepeatable != null) chkRepeatable.CheckedChanged += (s, e) =>
+        {
+            if (mEditorItem != null)
+            {
+                mEditorItem.Repeatable = chkRepeatable.Checked ?? false;
+            }
+        };
+
+        if (chkQuittable != null) chkQuittable.CheckedChanged += (s, e) =>
+        {
+            if (mEditorItem != null)
+            {
+                mEditorItem.Quitable = chkQuittable.Checked ?? false;
+            }
+        };
+
+        if (chkLogBeforeOffer != null) chkLogBeforeOffer.CheckedChanged += (s, e) =>
+        {
+            if (mEditorItem != null)
+            {
+                mEditorItem.LogBeforeOffer = chkLogBeforeOffer.Checked ?? false;
+            }
+        };
+
+        if (chkLogAfterComplete != null) chkLogAfterComplete.CheckedChanged += (s, e) =>
+        {
+            if (mEditorItem != null)
+            {
+                mEditorItem.LogAfterComplete = chkLogAfterComplete.Checked ?? false;
+            }
+        };
+
+        if (chkDoNotShowUnlessReqsMet != null) chkDoNotShowUnlessReqsMet.CheckedChanged += (s, e) =>
+        {
+            if (mEditorItem != null)
+            {
+                mEditorItem.DoNotShowUnlessRequirementsMet = chkDoNotShowUnlessReqsMet.Checked ?? false;
+            }
+        };
+
+        if (btnEditRequirements != null) btnEditRequirements.Click += (s, e) =>
+        {
+            if (mEditorItem != null)
+            {
+                var frm = new FrmDynamicRequirements(mEditorItem.Requirements, RequirementType.Quest);
+                frm.ShowModal(this);
+            }
+        };
+
+        if (btnSave != null) btnSave.Click += (s, e) =>
+        {
+            foreach (var item in mChanged)
+            {
+                item?.StartEvent?.RestoreBackup();
+                item?.StartEvent?.DeleteBackup();
+                item?.EndEvent?.RestoreBackup();
+                item?.EndEvent?.DeleteBackup();
+                item?.RestoreBackup();
+                item?.DeleteBackup();
+
+                if (item != null)
+                {
+                    PacketSender.SendSaveObject(item);
+                    if (item.StartEvent != null) PacketSender.SendSaveObject(item.StartEvent);
+                    if (item.EndEvent != null) PacketSender.SendSaveObject(item.EndEvent);
+                }
+            }
+            Close();
+            Globals.CurrentEditor = -1;
+        };
+
+        if (btnCancel != null) btnCancel.Click += (s, e) =>
+        {
+            foreach (var item in mChanged)
+            {
+                item?.StartEvent?.RestoreBackup();
+                item?.StartEvent?.DeleteBackup();
+                item?.EndEvent?.RestoreBackup();
+                item?.EndEvent?.DeleteBackup();
+                item?.RestoreBackup();
+                item?.DeleteBackup();
+            }
+            mEditorItem = null;
+            Close();
+            Globals.CurrentEditor = -1;
+        };
     }
 
     private void InitLocalization()
     {
-        Text = Strings.QuestEditor.title;
-        toolStripItemNew.Text = Strings.QuestEditor.New;
-        toolStripItemDelete.Text = Strings.QuestEditor.delete;
-        toolStripItemCopy.Text = Strings.QuestEditor.copy;
-        toolStripItemPaste.Text = Strings.QuestEditor.paste;
-        toolStripItemUndo.Text = Strings.QuestEditor.undo;
+//        Text = Strings.QuestEditor.title;
+        grpQuests!.Text = Strings.QuestEditor.quests;
+        grpGeneral!.Text = Strings.QuestEditor.general;
+        lblName!.Text = Strings.QuestEditor.name;
+        grpLogOptions!.Text = Strings.QuestEditor.logoptions;
+        chkLogAfterComplete!.Text = Strings.QuestEditor.showafter;
+        chkLogBeforeOffer!.Text = Strings.QuestEditor.showbefore;
+        grpProgessionOptions!.Text = Strings.QuestEditor.options;
+        chkRepeatable!.Text = Strings.QuestEditor.repeatable;
+        chkQuittable!.Text = Strings.QuestEditor.quit;
+        lblBeforeOffer!.Text = Strings.QuestEditor.beforeofferdesc;
+        lblOffer!.Text = Strings.QuestEditor.offerdesc;
+        lblInProgress!.Text = Strings.QuestEditor.inprogressdesc;
+        lblCompleted!.Text = Strings.QuestEditor.completeddesc;
+        grpQuestReqs!.Text = Strings.QuestEditor.requirements;
+        btnEditRequirements!.Text = Strings.QuestEditor.editrequirements;
+        grpQuestTasks!.Text = Strings.QuestEditor.tasks;
+        btnAddTask!.Text = Strings.QuestEditor.addtask;
+        btnRemoveTask!.Text = Strings.QuestEditor.removetask;
+        grpActions!.Text = Strings.QuestEditor.actions;
+        lblOnStart!.Text = Strings.QuestEditor.onstart;
+        btnEditStartEvent!.Text = Strings.QuestEditor.editstartevent;
+        lblOnEnd!.Text = Strings.QuestEditor.onend;
+        btnEditCompletionEvent!.Text = Strings.QuestEditor.editendevent;
+        btnAlphabetical!.Text = "A-Z";
+        txtSearch!.PlaceholderText = Strings.QuestEditor.searchplaceholder;
+        lblFolder!.Text = Strings.QuestEditor.folderlabel;
+        chkDoNotShowUnlessReqsMet!.Text = Strings.QuestEditor.donotshowunlessreqsmet;
+        lblUnstartedCategory!.Text = Strings.QuestEditor.unstartedcategory;
+        lblInProgressCategory!.Text = Strings.QuestEditor.inprogressgategory;
+        lblCompletedCategory!.Text = Strings.QuestEditor.completedcategory;
+        lblSortOrder!.Text = Strings.QuestEditor.order;
+        btnSave!.Text = Strings.QuestEditor.save;
+        btnCancel!.Text = Strings.QuestEditor.cancel;
 
-        grpQuests.Text = Strings.QuestEditor.quests;
-        grpGeneral.Text = Strings.QuestEditor.general;
-        lblName.Text = Strings.QuestEditor.name;
+        // Initialize category dropdowns
+        cmbUnstartedCategory!.Items.Clear();
+        cmbInProgressCategory!.Items.Clear();
+        cmbCompletedCategory!.Items.Clear();
 
-        grpLogOptions.Text = Strings.QuestEditor.logoptions;
-        chkLogAfterComplete.Text = Strings.QuestEditor.showafter;
-        chkLogBeforeOffer.Text = Strings.QuestEditor.showbefore;
-
-        grpProgessionOptions.Text = Strings.QuestEditor.options;
-        chkRepeatable.Text = Strings.QuestEditor.repeatable;
-        chkQuittable.Text = Strings.QuestEditor.quit;
-
-        lblBeforeOffer.Text = Strings.QuestEditor.beforeofferdesc;
-        lblOffer.Text = Strings.QuestEditor.offerdesc;
-        lblInProgress.Text = Strings.QuestEditor.inprogressdesc;
-        lblCompleted.Text = Strings.QuestEditor.completeddesc;
-
-        grpQuestReqs.Text = Strings.QuestEditor.requirements;
-        btnEditRequirements.Text = Strings.QuestEditor.editrequirements;
-
-        grpQuestTasks.Text = Strings.QuestEditor.tasks;
-        btnAddTask.Text = Strings.QuestEditor.addtask;
-        btnRemoveTask.Text = Strings.QuestEditor.removetask;
-
-        grpActions.Text = Strings.QuestEditor.actions;
-        lblOnStart.Text = Strings.QuestEditor.onstart;
-        btnEditStartEvent.Text = Strings.QuestEditor.editstartevent;
-        lblOnEnd.Text = Strings.QuestEditor.onend;
-        btnEditCompletionEvent.Text = Strings.QuestEditor.editendevent;
-
-        //Searching/Sorting
-        btnAlphabetical.ToolTipText = Strings.QuestEditor.sortalphabetically;
-        txtSearch.Text = Strings.QuestEditor.searchplaceholder;
-        lblFolder.Text = Strings.QuestEditor.folderlabel;
-
-
-        chkDoNotShowUnlessReqsMet.Text = Strings.QuestEditor.donotshowunlessreqsmet;
-
-        //Categories
-        lblUnstartedCategory.Text = Strings.QuestEditor.unstartedcategory;
-        lblInProgressCategory.Text = Strings.QuestEditor.inprogressgategory;
-        lblCompletedCategory.Text = Strings.QuestEditor.completedcategory;
         cmbUnstartedCategory.Items.Add(Strings.General.None);
         cmbInProgressCategory.Items.Add(Strings.General.None);
         cmbCompletedCategory.Items.Add(Strings.General.None);
@@ -105,11 +371,6 @@ public partial class FrmQuest : EditorForm
             cmbInProgressCategory.Items.Add(questCategory);
             cmbCompletedCategory.Items.Add(questCategory);
         }
-
-        lblSortOrder.Text = Strings.QuestEditor.order;
-
-        btnSave.Text = Strings.QuestEditor.save;
-        btnCancel.Text = Strings.QuestEditor.cancel;
     }
 
     protected override void GameObjectUpdatedDelegate(GameObjectType type)
@@ -125,606 +386,103 @@ public partial class FrmQuest : EditorForm
         }
     }
 
-    private void FrmQuest_FormClosed(object sender, FormClosedEventArgs e)
-    {
-        btnCancel_Click(null, null);
-    }
-
-    private void btnCancel_Click(object sender, EventArgs e)
-    {
-        foreach (var item in mChanged)
-        {
-            if (item == null)
-            {
-                Intersect.Core.ApplicationContext.Context.Value?.Logger.LogWarning($"Unexpected null: {nameof(FrmQuest)}.{nameof(btnCancel_Click)}() {nameof(item)}");
-            }
-            else
-            {
-                if (item.StartEvent == null)
-                {
-                    Intersect.Core.ApplicationContext.Context.Value?.Logger.LogWarning($"Unexpected null: {nameof(FrmQuest)}.{nameof(btnCancel_Click)}() {nameof(item)}.{nameof(item.StartEvent)}");
-                }
-
-                if (item.EndEvent == null)
-                {
-                    Intersect.Core.ApplicationContext.Context.Value?.Logger.LogWarning($"Unexpected null: {nameof(FrmQuest)}.{nameof(btnCancel_Click)}() {nameof(item)}.{nameof(item.EndEvent)}");
-                }
-            }
-
-            item?.StartEvent?.RestoreBackup();
-            item?.StartEvent?.DeleteBackup();
-            item?.EndEvent?.RestoreBackup();
-            item?.EndEvent?.DeleteBackup();
-            item?.RestoreBackup();
-            item?.DeleteBackup();
-        }
-
-        mEditorItem = null;
-        Hide();
-        Globals.CurrentEditor = -1;
-        Dispose();
-    }
-
-    private void btnSave_Click(object sender, EventArgs e)
-    {
-        //Send Changed items
-        mChanged?.ForEach(
-            item =>
-            {
-                if (item == null)
-                {
-                    return;
-                }
-
-                foreach (var id in item.OriginalTaskEventIds.Keys)
-                {
-                    var found = false;
-                    for (var i = 0; i < item.Tasks.Count; i++)
-                    {
-                        if (item.Tasks[i].Id == id)
-                        {
-                            found = true;
-                        }
-                    }
-
-                    if (!found)
-                    {
-                        item.RemoveEvents.Add(item.OriginalTaskEventIds[id]);
-                    }
-                }
-
-                PacketSender.SendSaveObject(item);
-                PacketSender.SendSaveObject(item.StartEvent);
-                PacketSender.SendSaveObject(item.EndEvent);
-                item.Tasks?.ForEach(
-                    tsk =>
-                    {
-                        if (tsk?.EditingEvent == null)
-                        {
-                            return;
-                        }
-
-                        if (tsk.EditingEvent.Id != Guid.Empty)
-                        {
-                            PacketSender.SendSaveObject(tsk.EditingEvent);
-                        }
-
-                        tsk.EditingEvent.DeleteBackup();
-                    }
-                );
-
-                item.StartEvent?.DeleteBackup();
-                item.EndEvent?.DeleteBackup();
-                item.DeleteBackup();
-            }
-        );
-
-        mEditorItem = null;
-        Hide();
-        Globals.CurrentEditor = -1;
-        Dispose();
-    }
-
     private void UpdateEditor()
     {
         if (mEditorItem != null)
         {
-            pnlContainer.Show();
+            pnlContainer!.Visible = true;
 
-            txtName.Text = mEditorItem.Name;
-            cmbFolder.Text = mEditorItem.Folder;
-            txtBeforeDesc.Text = mEditorItem.BeforeDescription;
-            txtStartDesc.Text = mEditorItem.StartDescription;
-            txtInProgressDesc.Text = mEditorItem.InProgressDescription;
-            txtEndDesc.Text = mEditorItem.EndDescription;
+            txtName!.Text = mEditorItem.Name;
+            // cmbFolder!.Text = mEditorItem.Folder; // DropDown doesn't have Text setter in Eto
+            txtBeforeDesc!.Text = mEditorItem.BeforeDescription;
+            txtStartDesc!.Text = mEditorItem.StartDescription;
+            txtInProgressDesc!.Text = mEditorItem.InProgressDescription;
+            txtEndDesc!.Text = mEditorItem.EndDescription;
 
-            chkRepeatable.Checked = Convert.ToBoolean(mEditorItem.Repeatable);
-            chkQuittable.Checked = Convert.ToBoolean(mEditorItem.Quitable);
-            chkLogBeforeOffer.Checked = Convert.ToBoolean(mEditorItem.LogBeforeOffer);
-            chkLogAfterComplete.Checked = Convert.ToBoolean(mEditorItem.LogAfterComplete);
+            chkRepeatable!.Checked = Convert.ToBoolean(mEditorItem.Repeatable);
+            chkQuittable!.Checked = Convert.ToBoolean(mEditorItem.Quitable);
+            chkLogBeforeOffer!.Checked = Convert.ToBoolean(mEditorItem.LogBeforeOffer);
+            chkLogAfterComplete!.Checked = Convert.ToBoolean(mEditorItem.LogAfterComplete);
+            chkDoNotShowUnlessReqsMet!.Checked = Convert.ToBoolean(mEditorItem.DoNotShowUnlessRequirementsMet);
 
-            chkDoNotShowUnlessReqsMet.Checked = Convert.ToBoolean(mEditorItem.DoNotShowUnlessRequirementsMet);
+            var unstartedIdx = cmbUnstartedCategory!.Items.IndexOf(
+                new ListItem { Text = mEditorItem.UnstartedCategory ?? "" }
+            );
+            cmbUnstartedCategory.SelectedIndex = unstartedIdx >= 0 ? unstartedIdx : 0;
 
-            cmbUnstartedCategory.SelectedIndex = cmbUnstartedCategory.Items.IndexOf(mEditorItem.UnstartedCategory ?? "");
-            cmbInProgressCategory.SelectedIndex = cmbInProgressCategory.Items.IndexOf(mEditorItem.InProgressCategory ?? "");
-            cmbCompletedCategory.SelectedIndex = cmbCompletedCategory.Items.IndexOf(mEditorItem.CompletedCategory ?? "");
+            var inProgressIdx = cmbInProgressCategory!.Items.IndexOf(
+                new ListItem { Text = mEditorItem.InProgressCategory ?? "" }
+            );
+            cmbInProgressCategory.SelectedIndex = inProgressIdx >= 0 ? inProgressIdx : 0;
 
-            if (cmbUnstartedCategory.SelectedIndex == -1)
+            var completedIdx = cmbCompletedCategory!.Items.IndexOf(
+                new ListItem { Text = mEditorItem.CompletedCategory ?? "" }
+            );
+            cmbCompletedCategory.SelectedIndex = completedIdx >= 0 ? completedIdx : 0;
+
+            nudOrderValue!.Value = mEditorItem.OrderValue;
+
+            // Update tasks list
+            lstTasks!.Items.Clear();
+            foreach (var task in mEditorItem.Tasks)
             {
-                cmbUnstartedCategory.SelectedIndex = 0;
+                lstTasks.Items.Add(task.GetTaskString(Strings.TaskEditor.descriptions));
             }
-
-            if (cmbInProgressCategory.SelectedIndex == -1)
-            {
-                cmbInProgressCategory.SelectedIndex = 0;
-            }
-
-            if (cmbCompletedCategory.SelectedIndex == -1)
-            {
-                cmbCompletedCategory.SelectedIndex = 0;
-            }
-
-            nudOrderValue.Value = mEditorItem.OrderValue;
-
-            ListQuestTasks();
 
             if (mChanged.IndexOf(mEditorItem) == -1)
             {
                 mChanged.Add(mEditorItem);
                 mEditorItem.StartEvent?.MakeBackup();
                 mEditorItem.EndEvent?.MakeBackup();
-                foreach (var tsk in mEditorItem.Tasks)
-                {
-                    tsk.CompletionEvent?.MakeBackup();
-                    tsk.EditingEvent = tsk.CompletionEvent;
-                }
-
                 mEditorItem.MakeBackup();
             }
         }
         else
         {
-            pnlContainer.Hide();
+            pnlContainer!.Visible = false;
         }
-        
+
         var hasItem = mEditorItem != null;
-        
         UpdateEditorButtons(hasItem);
-        UpdateToolStripItems();
     }
-
-    private void txtName_TextChanged(object sender, EventArgs e)
-    {
-        if (mEditorItem != null)
-        {
-            mEditorItem.Name = txtName?.Text ?? "";
-
-            //Rename all events
-            if (mEditorItem.StartEvent != null)
-            {
-                mEditorItem.StartEvent.Name = Strings.QuestEditor.startevent.ToString(mEditorItem.Name);
-            }
-
-            if (mEditorItem.EndEvent != null)
-            {
-                mEditorItem.EndEvent.Name = Strings.QuestEditor.endevent.ToString(mEditorItem.Name);
-            }
-
-            if (mEditorItem.Tasks != null)
-            {
-                foreach (var tsk in mEditorItem.Tasks)
-                {
-                    if (tsk.CompletionEvent != null)
-                    {
-                        tsk.CompletionEvent.Name = Strings.TaskEditor.completionevent.ToString(mEditorItem.Name);
-                    }
-                }
-            }
-
-            lstGameObjects.UpdateText(txtName?.Text ?? "");
-        }
-    }
-
-    private void txtStartDesc_TextChanged(object sender, EventArgs e)
-    {
-        mEditorItem.StartDescription = txtStartDesc.Text;
-    }
-
-    private void txtEndDesc_TextChanged(object sender, EventArgs e)
-    {
-        mEditorItem.EndDescription = txtEndDesc.Text;
-    }
-
-    private void btnEditStartEvent_Click(object sender, EventArgs e)
-    {
-        mEditorItem.StartEvent.Name = Strings.QuestEditor.startevent.ToString(mEditorItem.Name);
-        OpenQuestEvent(mEditorItem.StartEvent);
-    }
-
-    private void btnEditCompletionEvent_Click(object sender, EventArgs e)
-    {
-        mEditorItem.EndEvent.Name = Strings.QuestEditor.endevent.ToString(mEditorItem.Name);
-        OpenQuestEvent(mEditorItem.EndEvent);
-    }
-
-    private void OpenQuestEvent(EventDescriptor evt)
-    {
-        var editor = new FrmEvent(null) {MyEvent = evt};
-        editor.InitEditor(true, true, true);
-        editor.ShowDialog();
-        Globals.MainForm.BringToFront();
-        BringToFront();
-    }
-
-    private void btnAddTask_Click(object sender, EventArgs e)
-    {
-        var questTask = new QuestTaskDescriptor(Guid.NewGuid());
-        questTask.EditingEvent = new EventDescriptor(questTask.Id, Guid.Empty, 0, 0, false);
-        questTask.EditingEvent.CommonEvent = false;
-        questTask.EditingEvent.Name = Strings.TaskEditor.completionevent.ToString(mEditorItem.Name);
-        mEditorItem.AddEvents.Add(questTask.Id, questTask.EditingEvent);
-        if (OpenTaskEditor(questTask))
-        {
-            mEditorItem.Tasks.Add(questTask);
-            ListQuestTasks();
-        }
-    }
-
-    private void ListQuestTasks()
-    {
-        lstTasks.Items.Clear();
-        foreach (var task in mEditorItem.Tasks)
-        {
-            lstTasks.Items.Add(task.GetTaskString(Strings.TaskEditor.descriptions));
-        }
-    }
-
-    private bool OpenTaskEditor(QuestTaskDescriptor task)
-    {
-        var cmdWindow = new QuestTaskEditor(mEditorItem, task);
-        var frm = new Form
-        {
-            Text = Strings.TaskEditor.title
-        };
-
-        frm.Controls.Add(cmdWindow);
-        frm.Size = new Size(0, 0);
-        frm.AutoSize = true;
-        frm.ControlBox = false;
-        frm.FormBorderStyle = FormBorderStyle.FixedDialog;
-        frm.StartPosition = FormStartPosition.CenterParent;
-        frm.BackColor = cmdWindow.BackColor;
-        cmdWindow.BringToFront();
-        frm.ShowDialog();
-        if (!cmdWindow.Cancelled)
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-    private void btnRemoveTask_Click(object sender, EventArgs e)
-    {
-        if (lstTasks.SelectedIndex > -1)
-        {
-            if (mEditorItem.AddEvents.ContainsKey(mEditorItem.Tasks[lstTasks.SelectedIndex].Id))
-            {
-                mEditorItem.AddEvents.Remove(mEditorItem.Tasks[lstTasks.SelectedIndex].Id);
-            }
-
-            mEditorItem.Tasks.RemoveAt(lstTasks.SelectedIndex);
-            ListQuestTasks();
-        }
-    }
-
-    private void btnShiftTaskUp_Click(object sender, EventArgs e)
-    {
-        if (lstTasks.SelectedIndex > 0)
-        {
-            var item = mEditorItem.Tasks[lstTasks.SelectedIndex];
-            mEditorItem.Tasks.RemoveAt(lstTasks.SelectedIndex);
-            mEditorItem.Tasks.Insert(lstTasks.SelectedIndex - 1, item);
-            ListQuestTasks();
-        }
-    }
-
-    private void btnShiftTaskDown_Click(object sender, EventArgs e)
-    {
-        if (lstTasks.SelectedIndex > -1 && lstTasks.SelectedIndex != lstTasks.Items.Count - 1)
-        {
-            var item = mEditorItem.Tasks[lstTasks.SelectedIndex];
-            mEditorItem.Tasks.RemoveAt(lstTasks.SelectedIndex);
-            mEditorItem.Tasks.Insert(lstTasks.SelectedIndex + 1, item);
-            ListQuestTasks();
-        }
-    }
-
-    private void txtInProgressDesc_TextChanged(object sender, EventArgs e)
-    {
-        mEditorItem.InProgressDescription = txtInProgressDesc.Text;
-    }
-
-    private void chkRepeatable_CheckedChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Repeatable = chkRepeatable.Checked;
-    }
-
-    private void chkQuittable_CheckedChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Quitable = chkQuittable.Checked;
-    }
-
-    private void lstTasks_DoubleClick(object sender, EventArgs e)
-    {
-        if (lstTasks.SelectedIndex > -1 && mEditorItem.Tasks.Count > lstTasks.SelectedIndex)
-        {
-            if (OpenTaskEditor(mEditorItem.Tasks[lstTasks.SelectedIndex]))
-            {
-                ListQuestTasks();
-            }
-        }
-    }
-
-    private void txtBeforeDesc_TextChanged(object sender, EventArgs e)
-    {
-        mEditorItem.BeforeDescription = txtBeforeDesc.Text;
-    }
-
-    private void chkLogBeforeOffer_CheckedChanged(object sender, EventArgs e)
-    {
-        mEditorItem.LogBeforeOffer = chkLogBeforeOffer.Checked;
-    }
-
-    private void chkLogAfterComplete_CheckedChanged(object sender, EventArgs e)
-    {
-        mEditorItem.LogAfterComplete = chkLogAfterComplete.Checked;
-    }
-
-    private void toolStripItemNew_Click(object sender, EventArgs e)
-    {
-        PacketSender.SendCreateObject(GameObjectType.Quest);
-    }
-
-    private void toolStripItemDelete_Click(object sender, EventArgs e)
-    {
-        if (mEditorItem != null && lstGameObjects.Focused)
-        {
-            if (DarkMessageBox.ShowWarning(
-                    Strings.QuestEditor.deleteprompt, Strings.QuestEditor.deletetitle, DarkDialogButton.YesNo,
-                    Icon
-                ) ==
-                DialogResult.Yes)
-            {
-                PacketSender.SendDeleteObject(mEditorItem);
-            }
-        }
-    }
-
-    private void toolStripItemCopy_Click(object sender, EventArgs e)
-    {
-        if (mEditorItem != null && lstGameObjects.Focused)
-        {
-            mCopiedItem = mEditorItem.JsonData;
-            toolStripItemPaste.Enabled = true;
-        }
-    }
-
-    private void toolStripItemPaste_Click(object sender, EventArgs e)
-    {
-        if (mEditorItem != null && mCopiedItem != null && lstGameObjects.Focused)
-        {
-            var startEventId = mEditorItem.StartEventId;
-            var endEventId = mEditorItem.EndEventId;
-            mEditorItem.Load(mCopiedItem, true);
-
-            EventDescriptor.Get(startEventId).Load(mEditorItem.StartEvent.JsonData);
-            EventDescriptor.Get(endEventId).Load(mEditorItem.EndEvent.JsonData);
-
-            mEditorItem.StartEventId = startEventId;
-            mEditorItem.EndEventId = endEventId;
-
-            //Fix tasks
-            foreach (var tsk in mEditorItem.Tasks)
-            {
-                var oldId = tsk.Id;
-                tsk.Id = Guid.NewGuid();
-
-                if (mEditorItem.AddEvents.ContainsKey(oldId))
-                {
-                    mEditorItem.AddEvents.Add(tsk.Id, mEditorItem.AddEvents[oldId]);
-                    tsk.EditingEvent = mEditorItem.AddEvents[tsk.Id];
-                    mEditorItem.AddEvents.Remove(oldId);
-                }
-                else
-                {
-                    var tskEventData = EventDescriptor.Get(tsk.CompletionEventId).JsonData;
-                    tsk.CompletionEventId = Guid.Empty;
-                    tsk.EditingEvent = new EventDescriptor(Guid.Empty, Guid.Empty, 0, 0, false);
-                    tsk.EditingEvent.Name = Strings.TaskEditor.completionevent.ToString(mEditorItem.Name);
-                    tsk.EditingEvent.Load(tskEventData);
-                    mEditorItem.AddEvents.Add(tsk.Id, tsk.EditingEvent);
-                }
-            }
-
-            UpdateEditor();
-        }
-    }
-
-    private void toolStripItemUndo_Click(object sender, EventArgs e)
-    {
-        if (mChanged.Contains(mEditorItem) && mEditorItem != null)
-        {
-            if (DarkMessageBox.ShowWarning(
-                    Strings.QuestEditor.undoprompt, Strings.QuestEditor.undotitle, DarkDialogButton.YesNo,
-                    Icon
-                ) ==
-                DialogResult.Yes)
-            {
-                mEditorItem.RestoreBackup();
-                UpdateEditor();
-            }
-        }
-    }
-
-    private void UpdateToolStripItems()
-    {
-        toolStripItemCopy.Enabled = mEditorItem != null && lstGameObjects.Focused;
-        toolStripItemPaste.Enabled = mEditorItem != null && mCopiedItem != null && lstGameObjects.Focused;
-        toolStripItemDelete.Enabled = mEditorItem != null && lstGameObjects.Focused;
-        toolStripItemUndo.Enabled = mEditorItem != null && lstGameObjects.Focused;
-    }
-
-    private void form_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Control)
-        {
-            if (e.KeyCode == Keys.N)
-            {
-                toolStripItemNew_Click(null, null);
-            }
-        }
-    }
-
-    private void btnEditRequirements_Click(object sender, EventArgs e)
-    {
-        var frm = new FrmDynamicRequirements(mEditorItem.Requirements, RequirementType.Quest);
-        frm.ShowDialog();
-    }
-
-    #region "Item List - Folders, Searching, Sorting, Etc"
 
     public void InitEditor()
     {
-        //Collect folders
         var mFolders = new List<string>();
         foreach (var itm in QuestDescriptor.Lookup)
         {
-            if (!string.IsNullOrEmpty(((QuestDescriptor) itm.Value).Folder) &&
-                !mFolders.Contains(((QuestDescriptor) itm.Value).Folder))
+            if (!string.IsNullOrEmpty(((QuestDescriptor)itm.Value).Folder) &&
+                !mFolders.Contains(((QuestDescriptor)itm.Value).Folder))
             {
-                mFolders.Add(((QuestDescriptor) itm.Value).Folder);
-                if (!mKnownFolders.Contains(((QuestDescriptor) itm.Value).Folder))
+                mFolders.Add(((QuestDescriptor)itm.Value).Folder);
+                if (!mKnownFolders.Contains(((QuestDescriptor)itm.Value).Folder))
                 {
-                    mKnownFolders.Add(((QuestDescriptor) itm.Value).Folder);
+                    mKnownFolders.Add(((QuestDescriptor)itm.Value).Folder);
                 }
             }
         }
 
         mFolders.Sort();
         mKnownFolders.Sort();
-        cmbFolder.Items.Clear();
+        cmbFolder!.Items.Clear();
         cmbFolder.Items.Add("");
-        cmbFolder.Items.AddRange(mKnownFolders.ToArray());
-
-        var items = QuestDescriptor.Lookup.OrderBy(p => p.Value?.Name).Select(pair => new KeyValuePair<Guid, KeyValuePair<string, string>>(pair.Key,
-            new KeyValuePair<string, string>(((QuestDescriptor)pair.Value)?.Name ?? Models.DatabaseObject<QuestDescriptor>.Deleted, ((QuestDescriptor)pair.Value)?.Folder ?? ""))).ToArray();
-        lstGameObjects.Repopulate(items, mFolders, btnAlphabetical.Checked, CustomSearch(), txtSearch.Text);
-    }
-
-    private void btnAddFolder_Click(object sender, EventArgs e)
-    {
-        var folderName = string.Empty;
-        var result = DarkInputBox.ShowInformation(
-            Strings.QuestEditor.folderprompt, Strings.QuestEditor.foldertitle, ref folderName,
-            DarkDialogButton.OkCancel
-        );
-
-        if (result == DialogResult.OK && !string.IsNullOrEmpty(folderName))
+        foreach (var folder in mKnownFolders)
         {
-            if (!cmbFolder.Items.Contains(folderName))
+            cmbFolder.Items.Add(folder);
+        }
+
+        if (lstGameObjects != null)
+        {
+            lstGameObjects.Items.Clear();
+            var items = QuestDescriptor.Lookup.OrderBy(p => p.Value?.Name);
+            foreach (var pair in items)
             {
-                mEditorItem.Folder = folderName;
-                lstGameObjects.ExpandFolder(folderName);
-                InitEditor();
-                cmbFolder.Text = folderName;
+                var quest = (QuestDescriptor?)pair.Value;
+                if (quest != null)
+                {
+                    lstGameObjects.Items.Add(new ListItem { Key = pair.Key.ToString(), Text = quest.Name ?? "Deleted" });
+                }
             }
         }
-    }
-
-    private void cmbFolder_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Folder = cmbFolder.Text;
-        InitEditor();
-    }
-
-    private void btnAlphabetical_Click(object sender, EventArgs e)
-    {
-        btnAlphabetical.Checked = !btnAlphabetical.Checked;
-        InitEditor();
-    }
-
-    private void txtSearch_TextChanged(object sender, EventArgs e)
-    {
-        InitEditor();
-    }
-
-    private void txtSearch_Leave(object sender, EventArgs e)
-    {
-        if (string.IsNullOrWhiteSpace(txtSearch.Text))
-        {
-            txtSearch.Text = Strings.QuestEditor.searchplaceholder;
-        }
-    }
-
-    private void txtSearch_Enter(object sender, EventArgs e)
-    {
-        txtSearch.SelectAll();
-        txtSearch.Focus();
-    }
-
-    private void btnClearSearch_Click(object sender, EventArgs e)
-    {
-        txtSearch.Text = Strings.QuestEditor.searchplaceholder;
-    }
-
-    private bool CustomSearch()
-    {
-        return !string.IsNullOrWhiteSpace(txtSearch.Text) &&
-               txtSearch.Text != Strings.QuestEditor.searchplaceholder;
-    }
-
-    private void txtSearch_Click(object sender, EventArgs e)
-    {
-        if (txtSearch.Text == Strings.QuestEditor.searchplaceholder)
-        {
-            txtSearch.SelectAll();
-        }
-    }
-
-    #endregion
-
-    private void chkDoNotShowUnlessReqsMet_CheckedChanged(object sender, EventArgs e)
-    {
-        mEditorItem.DoNotShowUnlessRequirementsMet = chkDoNotShowUnlessReqsMet.Checked;
-    }
-
-    private void cmbUnstartedCategory_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        if (cmbUnstartedCategory.SelectedIndex > -1)
-        {
-            mEditorItem.UnstartedCategory = cmbUnstartedCategory.Text;
-        }
-    }
-
-    private void cmbInProgressCategory_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        if (cmbInProgressCategory.SelectedIndex > -1)
-        {
-            mEditorItem.InProgressCategory = cmbInProgressCategory.Text;
-        }
-    }
-
-    private void cmbCompletedCategory_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        if (cmbCompletedCategory.SelectedIndex > -1)
-        {
-            mEditorItem.CompletedCategory = cmbCompletedCategory.Text;
-        }
-    }
-
-    private void nudOrderValue_ValueChanged(object sender, EventArgs e)
-    {
-        mEditorItem.OrderValue = (int)nudOrderValue.Value;
     }
 }

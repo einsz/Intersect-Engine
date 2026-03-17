@@ -1,3 +1,4 @@
+using Eto.Forms;
 using Intersect.Editor.Content;
 using Intersect.Editor.Forms;
 using Intersect.Editor.General;
@@ -23,30 +24,63 @@ public static partial class Main
 
     private static Thread sMapThread;
 
-    private static FrmMain sMyForm;
+    private static dynamic? sMyForm;
 
-    private static FrmProgress sProgressForm;
+    private static FrmProgress? sProgressForm;
 
     private static long sWaterfallTimer = Timing.Global.MillisecondsUtc;
 
+    private static UITimer sRenderTimer;
+
+    public static bool LoopStarted = false;
+
     public static void StartLoop()
     {
+        if (LoopStarted)
+        {
+            return;
+        }
+        LoopStarted = true;
+
+        Console.WriteLine("Main.StartLoop() called");
+
+        // Initialize MonoGame graphics device for rendering
+        try
+        {
+            Core.Graphics.InitMonogame();
+            Console.WriteLine("Graphics.InitMonogame() completed");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Graphics.InitMonogame() failed: {ex.Message}");
+        }
+
         AppDomain.CurrentDomain.UnhandledException += Program.CurrentDomain_UnhandledException;
         Globals.MainForm.Visible = true;
         Globals.MainForm.EnterMap(Globals.CurrentMap == null ? Guid.Empty : Globals.CurrentMap.Id);
         sMyForm = Globals.MainForm;
+        Console.WriteLine($"Map entered: {Globals.CurrentMap?.Id ?? Guid.Empty}");
 
         if (sMapThread == null)
-
         {
             sMapThread = new Thread(UpdateMaps);
             sMapThread.Start();
 
-            // drawing loop
-            while (sMyForm.Visible) // loop while the window is open
+            // Use Eto UITimer for the render loop instead of blocking while loop
+            sRenderTimer = new UITimer();
+            sRenderTimer.Interval = 1.0 / 60.0; // 60 FPS
+            sRenderTimer.Elapsed += (sender, e) =>
             {
-                RunFrame();
-            }
+                if (sMyForm != null && sMyForm.Visible)
+                {
+                    RunFrame();
+                }
+                else
+                {
+                    sRenderTimer.Stop();
+                }
+            };
+            sRenderTimer.Start();
         }
     }
 
@@ -67,7 +101,7 @@ public static partial class Main
     {
         //Shooting for 30fps
         var startTime = Timing.Global.MillisecondsUtc;
-        sMyForm.Update();
+        sMyForm?.Update();
 
         if (sWaterfallTimer < Timing.Global.MillisecondsUtc)
         {
@@ -95,18 +129,15 @@ public static partial class Main
 
         GameContentManager.Update();
         Networking.Network.Update();
-        Application.DoEvents(); // handle form events
 
         sFpsCount++;
         if (sFpsTime < Timing.Global.MillisecondsUtc)
         {
             sFps = sFpsCount;
-            sMyForm.toolStripLabelFPS.Text = Strings.MainForm.fps.ToString(sFps);
+            sMyForm?.UpdateFpsLabel(sFps);
             sFpsCount = 0;
             sFpsTime = Timing.Global.MillisecondsUtc + 1000;
         }
-
-        Thread.Sleep(Math.Max(1, (int) (1000 / 60f - (Timing.Global.MillisecondsUtc - startTime))));
     }
 
     private static void UpdateMaps()
@@ -114,15 +145,15 @@ public static partial class Main
         while (!Globals.ClosingEditor)
         {
             if (Globals.MapsToScreenshot.Count > 0 &&
-                Globals.FetchingMapPreviews == false &&
-                sMyForm.InvokeRequired)
+                Globals.FetchingMapPreviews == false)
             {
-                if (sProgressForm == null || sProgressForm.IsDisposed || sProgressForm.Visible == false)
+                if (sProgressForm == null || !sProgressForm.Visible)
                 {
                     sProgressForm = new FrmProgress();
 
                     sProgressForm.SetTitle(Strings.MapCacheProgress.title);
-                    new Task(() => Globals.MainForm.ShowDialogForm(sProgressForm)).Start();
+                    Application.Instance.Invoke(() => sProgressForm.Show());
+
                     while (Globals.MapsToScreenshot.Count > 0)
                     {
                         try
@@ -130,14 +161,14 @@ public static partial class Main
                             var maps = MapInstance.Lookup.ValueList.ToArray();
                             foreach (MapInstance map in maps)
                             {
-                                if (!sMyForm.Disposing && sProgressForm.IsHandleCreated)
+                                if (sProgressForm != null && sProgressForm.Visible)
                                 {
-                                    sProgressForm.BeginInvoke(
-                                        (Action) (() => sProgressForm.SetProgress(
+                                    Application.Instance.Invoke(() =>
+                                        sProgressForm.SetProgress(
                                             Strings.MapCacheProgress.remaining.ToString(
                                                 Globals.MapsToScreenshot.Count
                                             ), -1, false
-                                        ))
+                                        )
                                     );
                                 }
 
@@ -147,7 +178,6 @@ public static partial class Main
                                 }
 
                                 Networking.Network.Update();
-                                Application.DoEvents();
                             }
                         }
                         catch (Exception exception)
@@ -162,12 +192,7 @@ public static partial class Main
                     }
 
                     Globals.MapGrid.ResetForm();
-                    while (!sProgressForm.IsHandleCreated)
-                    {
-                        Thread.Sleep(50);
-                    }
-
-                    sProgressForm.BeginInvoke(new Action(() => sProgressForm.Close()));
+                    Application.Instance.Invoke(() => sProgressForm?.Close());
                 }
             }
 

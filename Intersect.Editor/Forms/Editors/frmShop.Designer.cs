@@ -1,3 +1,4 @@
+using Intersect.Editor.Forms.Helpers;
 using DarkUI.Controls;
 
 namespace Intersect.Editor.Forms.Editors

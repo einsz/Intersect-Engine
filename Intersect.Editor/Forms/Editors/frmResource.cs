@@ -1,145 +1,337 @@
-using System.ComponentModel;
-using System.Diagnostics.CodeAnalysis;
-using DarkUI.Forms;
-using Intersect.Editor.Content;
+using Intersect.Editor.Forms.Helpers;
+using Eto.Forms;
+using Eto.Drawing;
 using Intersect.Editor.Core;
 using Intersect.Editor.General;
 using Intersect.Editor.Localization;
 using Intersect.Editor.Networking;
 using Intersect.Enums;
-using Intersect.Framework.Core.GameObjects.Animations;
-using Intersect.Framework.Core.GameObjects.Items;
 using Intersect.Framework.Core.GameObjects.Resources;
+using Intersect.Framework.Core.GameObjects.Items;
+using Intersect.Framework.Core.GameObjects.Animations;
 using Intersect.Utilities;
 using EventDescriptor = Intersect.Framework.Core.GameObjects.Events.EventDescriptor;
-using Graphics = System.Drawing.Graphics;
 
 namespace Intersect.Editor.Forms.Editors;
 
 public partial class FrmResource : EditorForm
 {
-    private readonly List<string> _knownFolders = [];
-    private readonly BindingList<NotifiableDrop> _dropList = [];
-    private readonly BindingList<ResourceStateDescriptor> _stateList = [];
-    private readonly Dictionary<Guid, ResourceDescriptor> _changed = [];
-
+    private readonly List<string> _knownFolders = new();
+    private readonly Dictionary<Guid, ResourceDescriptor> _changed = new();
     private string? _copiedItem;
     private ResourceDescriptor? _editorItem;
-    private Bitmap? _graphicBitmap;
-    private Bitmap? _resourceGraphic;
-    private bool _mouseDown;
+
+    protected ListBox? lstGameObjects;
+    protected ListBox? lstDrops;
+    protected ListBox? lstStates;
+    protected TextBox? txtName;
+    protected TextBox? txtCannotHarvest;
+    protected TextBox? txtStateName;
+    protected TextBox? txtSearch;
+    protected DropDown? cmbFolder;
+    protected DropDown? cmbToolType;
+    protected DropDown? cmbDeathAnimation;
+    protected DropDown? cmbDropItem;
+    protected DropDown? cmbEvent;
+    protected DropDown? cmbTextureType;
+    protected DropDown? cmbTextureSource;
+    protected DropDown? cmbAnimation;
+    protected NumericStepper? nudMinHp;
+    protected NumericStepper? nudMaxHp;
+    protected NumericStepper? nudSpawnDuration;
+    protected NumericStepper? nudHpRegen;
+    protected NumericStepper? nudDropMaxAmount;
+    protected NumericStepper? nudDropMinAmount;
+    protected NumericStepper? nudDropChance;
+    protected NumericStepper? nudStateRangeMin;
+    protected NumericStepper? nudStateRangeMax;
+    protected CheckBox? chkWalkableBefore;
+    protected CheckBox? chkWalkableAfter;
+    protected CheckBox? chkUseExplicitMaxHealthForResourceStates;
+    protected CheckBox? chkRenderBelowEntity;
+    protected CheckBox? btnAlphabetical;
+    protected Button? btnSave;
+    protected Button? btnCancel;
+    protected Button? btnRequirements;
+    protected Button? btnDropAdd;
+    protected Button? btnDropRemove;
+    protected Button? btnAddState;
+    protected Button? btnRemoveState;
+    protected Button? btnAddFolder;
+    protected Button? btnClearSearch;
+    protected GroupBox? grpResources;
+    protected GroupBox? grpGeneral;
+    protected GroupBox? grpDrops;
+    protected GroupBox? grpGraphics;
+    protected GroupBox? grpGraphicData;
+    protected GroupBox? grpCommonEvent;
+    protected GroupBox? grpRequirements;
+    protected Panel? pnlContainer;
+    protected Panel? picResource;
+    protected Label? lblName;
+    protected Label? lblToolType;
+    protected Label? lblHP;
+    protected Label? lblMaxHp;
+    protected Label? lblSpawnDuration;
+    protected Label? lblDeathAnimation;
+    protected Label? lblDropItem;
+    protected Label? lblDropMaxAmount;
+    protected Label? lblDropMinAmount;
+    protected Label? lblDropChance;
+    protected Label? lblHpRegen;
+    protected Label? lblEvent;
+    protected Label? lblCannotHarvest;
+    protected Label? lblStates;
+    protected Label? lblStateName;
+    protected Label? lblTextureType;
+    protected Label? lblTerxtureSource;
+    protected Label? lblAnimation;
+    protected Label? lblFolder;
 
     public FrmResource()
     {
         ApplyHooks();
-        InitializeComponent();
-        Icon = Program.Icon;
+        BuildUI();
+        InitializeForm();
+    }
 
+    private void BuildUI()
+    {
+        Title = Strings.ResourceEditor.title;
+        MinimumSize = new Size(1024, 768);
+
+        var mainSplitter = new Splitter
+        {
+            Orientation = Orientation.Horizontal,
+            Position = 250,
+            Panel1 = BuildLeftPanel(),
+            Panel2 = BuildRightPanel()
+        };
+
+        Content = mainSplitter;
+    }
+
+    private Panel BuildLeftPanel()
+    {
+        lstGameObjects = new ListBox();
+        txtSearch = new TextBox { PlaceholderText = Strings.ResourceEditor.searchplaceholder };
+        btnAlphabetical = new CheckBox { Text = "A-Z" };
+        cmbFolder = new DropDown();
+        btnAddFolder = new Button { Text = "+" };
+        btnClearSearch = new Button { Text = "X" };
+        lblFolder = new Label { Text = Strings.ResourceEditor.folderlabel };
+
+        var searchPanel = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Items = { txtSearch, btnClearSearch, btnAlphabetical }
+        };
+
+        var folderPanel = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Items = { lblFolder, cmbFolder, btnAddFolder }
+        };
+
+        return new Panel
+        {
+            Content = new StackLayout
+            {
+                Padding = new Padding(5),
+                Spacing = 5,
+                Items = { searchPanel, folderPanel, lstGameObjects }
+            }
+        };
+    }
+
+    private Panel BuildRightPanel()
+    {
+        pnlContainer = new Panel();
+        BuildEditorControls();
+
+        var topButtons = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 5,
+            Items =
+            {
+                new Button { Text = Strings.ResourceEditor.New },
+                new Button { Text = Strings.ResourceEditor.delete },
+                new Button { Text = Strings.ResourceEditor.copy },
+                new Button { Text = Strings.ResourceEditor.paste },
+                new Button { Text = Strings.ResourceEditor.undo }
+            }
+        };
+
+        btnSave = new Button { Text = Strings.ResourceEditor.save };
+        btnCancel = new Button { Text = Strings.ResourceEditor.cancel };
         _btnSave = btnSave;
         _btnCancel = btnCancel;
-        cmbToolType.Items.Clear();
+
+        var bottomButtons = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 5,
+            Items = { btnSave, btnCancel }
+        };
+
+        return new Panel
+        {
+            Content = new StackLayout
+            {
+                Padding = new Padding(5),
+                Spacing = 5,
+                Items = { topButtons, pnlContainer, bottomButtons }
+            }
+        };
+    }
+
+    private void BuildEditorControls()
+    {
+        txtName = new TextBox();
+        txtCannotHarvest = new TextBox();
+        txtStateName = new TextBox();
+        cmbToolType = new DropDown();
+        cmbDeathAnimation = new DropDown();
+        cmbDropItem = new DropDown();
+        cmbEvent = new DropDown();
+        cmbTextureType = new DropDown();
+        cmbTextureSource = new DropDown();
+        cmbAnimation = new DropDown();
+
+        nudMinHp = new NumericStepper { MinValue = 0 };
+        nudMaxHp = new NumericStepper { MinValue = 0 };
+        nudSpawnDuration = new NumericStepper { MinValue = 0 };
+        nudHpRegen = new NumericStepper { MinValue = 0, MaxValue = 100 };
+        nudDropMaxAmount = new NumericStepper { MinValue = 1 };
+        nudDropMinAmount = new NumericStepper { MinValue = 1 };
+        nudDropChance = new NumericStepper { MinValue = 0, MaxValue = 100, DecimalPlaces = 2 };
+        nudStateRangeMin = new NumericStepper { MinValue = 0 };
+        nudStateRangeMax = new NumericStepper { MinValue = 0 };
+
+        chkWalkableBefore = new CheckBox { Text = Strings.ResourceEditor.walkablebefore };
+        chkWalkableAfter = new CheckBox { Text = Strings.ResourceEditor.walkableafter };
+        chkUseExplicitMaxHealthForResourceStates = new CheckBox { Text = Strings.ResourceEditor.UseExplicitMaxHealthForResourceStates };
+        chkRenderBelowEntity = new CheckBox { Text = Strings.ResourceEditor.BelowEntities };
+
+        lstDrops = new ListBox();
+        lstStates = new ListBox();
+        picResource = new Panel();
+
+        btnRequirements = new Button { Text = Strings.ResourceEditor.requirements };
+        btnDropAdd = new Button { Text = Strings.ResourceEditor.dropadd };
+        btnDropRemove = new Button { Text = Strings.ResourceEditor.dropremove };
+        btnAddState = new Button { Text = Strings.ResourceEditor.AddState };
+        btnRemoveState = new Button { Text = Strings.ResourceEditor.RemoveState };
+
+        grpResources = new GroupBox { Text = Strings.ResourceEditor.resources };
+        grpGeneral = new GroupBox { Text = Strings.ResourceEditor.general };
+        grpDrops = new GroupBox { Text = Strings.ResourceEditor.drops };
+        grpGraphics = new GroupBox { Text = Strings.ResourceEditor.Appearance };
+        grpGraphicData = new GroupBox { Text = Strings.ResourceEditor.StateProperties };
+        grpCommonEvent = new GroupBox { Text = Strings.ResourceEditor.commonevent };
+        grpRequirements = new GroupBox { Text = Strings.ResourceEditor.requirementsgroup };
+
+        pnlContainer = new Panel();
+
+        SetupEventHandlers();
+    }
+
+    private void SetupEventHandlers()
+    {
+        txtName!.TextChanged += (s, e) =>
+        {
+            if (_editorItem != null)
+            {
+                _editorItem.Name = txtName.Text;
+            }
+        };
+
+        if (chkWalkableBefore != null) chkWalkableBefore.CheckedChanged += (s, e) =>
+        {
+            if (_editorItem != null)
+            {
+                _editorItem.WalkableBefore = chkWalkableBefore.Checked ?? false;
+            }
+        };
+
+        if (chkWalkableAfter != null) chkWalkableAfter.CheckedChanged += (s, e) =>
+        {
+            if (_editorItem != null)
+            {
+                _editorItem.WalkableAfter = chkWalkableAfter.Checked ?? false;
+            }
+        };
+
+        if (btnRequirements != null) btnRequirements.Click += (s, e) =>
+        {
+            if (_editorItem != null)
+            {
+                var frm = new FrmDynamicRequirements(_editorItem.HarvestingRequirements, RequirementType.Resource);
+                frm.ShowModal(this);
+            }
+        };
+
+        if (btnSave != null) btnSave.Click += (s, e) =>
+        {
+            foreach (var item in _changed.Values)
+            {
+                PacketSender.SendSaveObject(item);
+                item.DeleteBackup();
+            }
+            Close();
+            Globals.CurrentEditor = -1;
+        };
+
+        if (btnCancel != null) btnCancel.Click += (s, e) =>
+        {
+            foreach (var item in _changed.Values)
+            {
+                item.RestoreBackup();
+                item.DeleteBackup();
+            }
+            Close();
+            Globals.CurrentEditor = -1;
+        };
+    }
+
+    private void InitializeForm()
+    {
+        cmbToolType!.Items.Clear();
         cmbToolType.Items.Add(Strings.General.None);
-        cmbToolType.Items.AddRange(Options.Instance.Equipment.ToolTypes.ToArray());
-        cmbEvent.Items.Clear();
+        foreach (var toolType in Options.Instance.Equipment.ToolTypes)
+        {
+            cmbToolType.Items.Add(toolType);
+        }
+
+        cmbDeathAnimation!.Items.Clear();
+        cmbDeathAnimation.Items.Add(Strings.General.None);
+        foreach (var name in AnimationDescriptor.Names)
+        {
+            cmbDeathAnimation.Items.Add(name);
+        }
+
+        cmbDropItem!.Items.Clear();
+        cmbDropItem.Items.Add(Strings.General.None);
+        foreach (var name in ItemDescriptor.Names)
+        {
+            cmbDropItem.Items.Add(name);
+        }
+
+        cmbEvent!.Items.Clear();
         cmbEvent.Items.Add(Strings.General.None);
-        cmbEvent.Items.AddRange(EventDescriptor.Names);
-
-        lstDrops.DataSource = _dropList;
-        lstDrops.DisplayMember = nameof(NotifiableDrop.DisplayName);
-        lstStates.DataSource = _stateList;
-        lstStates.DisplayMember = nameof(ResourceStateDescriptor.Name);
-        lstStates.ValueMember = nameof(ResourceStateDescriptor.Id);
-
-        lstGameObjects.Init(
-            UpdateToolStripItems,
-            AssignEditorItem,
-            toolStripItemNew_Click,
-            toolStripItemCopy_Click,
-            toolStripItemUndo_Click,
-            toolStripItemPaste_Click,
-            toolStripItemDelete_Click
-        );
-    }
-
-    #region Basic Editor Functions
-
-    private void AssignEditorItem(Guid id)
-    {
-        if (!ResourceDescriptor.TryGet(id, out _editorItem))
+        foreach (var name in Intersect.Framework.Core.GameObjects.Events.EventDescriptor.Names)
         {
-            _editorItem = null;
+            cmbEvent.Items.Add(name);
         }
 
-        UpdateEditor();
-    }
-
-    private void toolStripItemNew_Click(object sender, EventArgs e)
-    {
-        PacketSender.SendCreateObject(GameObjectType.Resource);
-    }
-
-    private void toolStripItemDelete_Click(object sender, EventArgs e)
-    {
-        if (_editorItem == null || !lstGameObjects.Focused)
+        cmbTextureType!.Items.Clear();
+        foreach (var source in Strings.ResourceEditor.TextureSources.Values)
         {
-            return;
+            cmbTextureType.Items.Add(source);
         }
 
-        if (DarkMessageBox.ShowWarning(
-                    Strings.ResourceEditor.deleteprompt,
-                    Strings.ResourceEditor.deletetitle,
-                    DarkDialogButton.YesNo,
-                    Icon
-                ) ==
-                DialogResult.Yes)
-        {
-            PacketSender.SendDeleteObject(_editorItem);
-        }
-    }
-
-    private void toolStripItemCopy_Click(object sender, EventArgs e)
-    {
-        if (_editorItem != null && lstGameObjects.Focused)
-        {
-            _copiedItem = _editorItem.JsonData;
-            toolStripItemPaste.Enabled = true;
-        }
-    }
-
-    private void toolStripItemPaste_Click(object sender, EventArgs e)
-    {
-        if (_editorItem != null && _copiedItem != null && lstGameObjects.Focused)
-        {
-            _editorItem.Load(_copiedItem, true);
-            UpdateEditor();
-        }
-    }
-
-    private void toolStripItemUndo_Click(object sender, EventArgs e)
-    {
-        if (_editorItem == null || !_changed.ContainsKey(_editorItem.Id))
-        {
-            return;
-        }
-
-        if (DarkMessageBox.ShowWarning(
-                    Strings.ResourceEditor.undoprompt, Strings.ResourceEditor.undotitle, DarkDialogButton.YesNo,
-                    Icon
-                ) ==
-                DialogResult.Yes)
-        {
-            _editorItem.RestoreBackup();
-            UpdateEditor();
-        }
-    }
-
-    private void UpdateToolStripItems()
-    {
-        var shouldEnableToolStripItems = _editorItem != null && lstGameObjects.Focused;
-        toolStripItemCopy.Enabled = shouldEnableToolStripItems;
-        toolStripItemPaste.Enabled = shouldEnableToolStripItems && _copiedItem != null;
-        toolStripItemDelete.Enabled = shouldEnableToolStripItems;
-        toolStripItemUndo.Enabled = shouldEnableToolStripItems;
+        InitEditor();
     }
 
     protected override void GameObjectUpdatedDelegate(GameObjectType type)
@@ -155,176 +347,27 @@ public partial class FrmResource : EditorForm
         }
     }
 
-    private void btnCancel_Click(object? sender, EventArgs? e)
-    {
-        foreach (var item in _changed.Values)
-        {
-            item.RestoreBackup();
-            item.DeleteBackup();
-        }
-
-        Hide();
-        Globals.CurrentEditor = -1;
-        Dispose();
-    }
-
-    private void btnSave_Click(object sender, EventArgs e)
-    {
-        //Send Changed items
-        foreach (var item in _changed.Values)
-        {
-            PacketSender.SendSaveObject(item);
-            item.DeleteBackup();
-        }
-
-        Hide();
-        Globals.CurrentEditor = -1;
-        Dispose();
-    }
-
-    #endregion
-
-    #region Form Events
-
-    private void frmResource_Load(object sender, EventArgs e)
-    {
-        _graphicBitmap = new Bitmap(picResource.Width, picResource.Height);
-
-        cmbDeathAnimation.Items.Clear();
-        cmbDeathAnimation.Items.Add(Strings.General.None);
-        cmbDeathAnimation.Items.AddRange(AnimationDescriptor.Names);
-        cmbDropItem.Items.Clear();
-        cmbDropItem.Items.Add(Strings.General.None);
-        cmbDropItem.Items.AddRange(ItemDescriptor.Names);
-        InitLocalization();
-        UpdateEditor();
-    }
-
-    private void frmResource_FormClosed(object sender, FormClosedEventArgs e)
-    {
-        btnCancel_Click(null, null);
-    }
-
-    private void form_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Control && e.KeyCode == Keys.N)
-        {
-            toolStripItemNew_Click(null, null);
-        }
-    }
-
-    #endregion
-
-    #region Intersect Setup
-
-    private void InitLocalization()
-    {
-        Text = Strings.ResourceEditor.title;
-        toolStripItemNew.Text = Strings.ResourceEditor.New;
-        toolStripItemDelete.Text = Strings.ResourceEditor.delete;
-        toolStripItemCopy.Text = Strings.ResourceEditor.copy;
-        toolStripItemPaste.Text = Strings.ResourceEditor.paste;
-        toolStripItemUndo.Text = Strings.ResourceEditor.undo;
-
-        grpResources.Text = Strings.ResourceEditor.resources;
-
-        grpGeneral.Text = Strings.ResourceEditor.general;
-        lblName.Text = Strings.ResourceEditor.name;
-        lblToolType.Text = Strings.ResourceEditor.tooltype;
-        lblHP.Text = Strings.ResourceEditor.minhp;
-        lblMaxHp.Text = Strings.ResourceEditor.maxhp;
-        lblSpawnDuration.Text = Strings.ResourceEditor.spawnduration;
-        lblDeathAnimation.Text = Strings.ResourceEditor.DeathAnimation;
-        chkWalkableBefore.Text = Strings.ResourceEditor.walkablebefore;
-        chkWalkableAfter.Text = Strings.ResourceEditor.walkableafter;
-        chkUseExplicitMaxHealthForResourceStates.Text = Strings.ResourceEditor.UseExplicitMaxHealthForResourceStates;
-
-        grpDrops.Text = Strings.ResourceEditor.drops;
-        lblDropItem.Text = Strings.ResourceEditor.dropitem;
-        lblDropMaxAmount.Text = Strings.ResourceEditor.DropMaxAmount;
-        lblDropMinAmount.Text = Strings.ResourceEditor.DropMinAmount;
-        lblDropChance.Text = Strings.ResourceEditor.dropchance;
-        btnDropAdd.Text = Strings.ResourceEditor.dropadd;
-        btnDropRemove.Text = Strings.ResourceEditor.dropremove;
-
-        lblHpRegen.Text = Strings.ResourceEditor.HealthRegenPercent;
-        new ToolTip().SetToolTip(lblHpRegen, Strings.ResourceEditor.regenhint);
-
-        grpGraphics.Text = Strings.ResourceEditor.Appearance;
-        lblStates.Text = Strings.ResourceEditor.StatesLabel;
-        lblStateName.Text = Strings.ResourceEditor.StateName;
-        btnAddState.Text = Strings.ResourceEditor.AddState;
-        btnRemoveState.Text = Strings.ResourceEditor.RemoveState;
-        grpGraphicData.Text = Strings.ResourceEditor.StateProperties;
-        lblTextureType.Text = Strings.ResourceEditor.TextureSource;
-        cmbTextureType.Items.Clear();
-        cmbTextureType.Items.AddRange([.. Strings.ResourceEditor.TextureSources.Values]);
-        chkRenderBelowEntity.Text = Strings.ResourceEditor.BelowEntities;
-        lblTerxtureSource.Text = Strings.ResourceEditor.TextureName;
-        lblAnimation.Text = Strings.ResourceEditor.Animation;
-
-        grpCommonEvent.Text = Strings.ResourceEditor.commonevent;
-        lblEvent.Text = Strings.ResourceEditor.harvestevent;
-
-        grpRequirements.Text = Strings.ResourceEditor.requirementsgroup;
-        lblCannotHarvest.Text = Strings.ResourceEditor.cannotharvest;
-        btnRequirements.Text = Strings.ResourceEditor.requirements;
-
-        //Searching/Sorting
-        btnAlphabetical.ToolTipText = Strings.ResourceEditor.sortalphabetically;
-        txtSearch.Text = Strings.ResourceEditor.searchplaceholder;
-        lblFolder.Text = Strings.ResourceEditor.folderlabel;
-
-        btnSave.Text = Strings.ResourceEditor.save;
-        btnCancel.Text = Strings.ResourceEditor.cancel;
-    }
-
     private void UpdateEditor()
     {
         if (_editorItem != null)
         {
-            pnlContainer.Show();
+            pnlContainer!.Visible = true;
 
-            txtName.Text = _editorItem.Name;
-            cmbFolder.Text = _editorItem.Folder;
-            cmbToolType.SelectedIndex = _editorItem.Tool + 1;
-            nudSpawnDuration.Value = _editorItem.SpawnDuration;
-            cmbDeathAnimation.SelectedIndex = AnimationDescriptor.ListIndex(_editorItem.DeathAnimationId) + 1;
-            nudMinHp.Value = _editorItem.MinHp;
-            nudMaxHp.Value = _editorItem.MaxHp;
-            chkWalkableBefore.Checked = _editorItem.WalkableBefore;
-            chkWalkableAfter.Checked = _editorItem.WalkableAfter;
-            chkUseExplicitMaxHealthForResourceStates.Checked = _editorItem.UseExplicitMaxHealthForResourceStates;
-            cmbEvent.SelectedIndex = EventDescriptor.ListIndex(_editorItem.EventId) + 1;
-            txtCannotHarvest.Text = _editorItem.CannotHarvestMessage;
-            nudHpRegen.Value = _editorItem.VitalRegen;
-            picResource.Hide();
+            txtName!.Text = _editorItem.Name;
+            // cmbFolder!.Text = _editorItem.Folder; // DropDown doesn't have Text setter in Eto
+            cmbToolType!.SelectedIndex = _editorItem.Tool + 1;
+            nudSpawnDuration!.Value = _editorItem.SpawnDuration;
+            cmbDeathAnimation!.SelectedIndex = AnimationDescriptor.ListIndex(_editorItem.DeathAnimationId) + 1;
+            nudMinHp!.Value = _editorItem.MinHp;
+            nudMaxHp!.Value = _editorItem.MaxHp;
+            chkWalkableBefore!.Checked = _editorItem.WalkableBefore;
+            chkWalkableAfter!.Checked = _editorItem.WalkableAfter;
+            chkUseExplicitMaxHealthForResourceStates!.Checked = _editorItem.UseExplicitMaxHealthForResourceStates;
+            cmbEvent!.SelectedIndex = Intersect.Framework.Core.GameObjects.Events.EventDescriptor.ListIndex(_editorItem.EventId) + 1;
+            txtCannotHarvest!.Text = _editorItem.CannotHarvestMessage;
+            nudHpRegen!.Value = _editorItem.VitalRegen;
 
-            _stateList.Clear();
-            foreach (var state in _editorItem.States.Values)
-            {
-                _stateList.Add(state);
-            }
-
-            if (lstStates.Items.Count > 0)
-            {
-                UpdateStateControls();
-            }
-            else
-            {
-                txtStateName.Text = string.Empty;
-                cmbTextureType.SelectedIndex = (int)ResourceTextureSource.Resource;
-                chkRenderBelowEntity.Checked = false;
-                cmbTextureSource.Items.Clear();
-                cmbAnimation.Items.Clear();
-                nudStateRangeMin.Value = 0;
-                nudStateRangeMax.Value = 0;
-                picResource.Hide();
-            }
-
-            UpdateDropValues();
-
-            if (!_changed.TryGetValue(_editorItem.Id, out var _))
+            if (!_changed.TryGetValue(_editorItem.Id, out _))
             {
                 _changed.Add(_editorItem.Id, _editorItem);
                 _editorItem.MakeBackup();
@@ -332,773 +375,14 @@ public partial class FrmResource : EditorForm
         }
         else
         {
-            pnlContainer.Hide();
+            pnlContainer!.Visible = false;
         }
-        
-        UpdateEditorButtons(_editorItem != default);
-        UpdateToolStripItems();
+
+        UpdateEditorButtons(_editorItem != null);
     }
-
-    #endregion
-
-    #region Helpers
-
-    private bool TryGetCurrentState([NotNullWhen(true)] out ResourceStateDescriptor? state)
-    {
-        state = null;
-
-        if (_editorItem is null)
-        {
-            return false;
-        }
-
-        if (lstStates.SelectedIndex < 0)
-        {
-            return false;
-        }
-
-        if (lstStates.SelectedValue is not Guid selectedId)
-        {
-            return false;
-        }
-
-        if (!_editorItem.States.TryGetValue(selectedId, out state))
-        {
-            return false;
-        }
-
-        return true;
-    }
-
-    private void UpdateDropValues()
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        _dropList.Clear();
-        foreach (var drop in _editorItem.Drops)
-        {
-            _dropList.Add(new NotifiableDrop
-            {
-                ItemId = drop.ItemId,
-                MinQuantity = drop.MinQuantity,
-                MaxQuantity = drop.MaxQuantity,
-                Chance = drop.Chance
-            });
-        }
-    }
-
-    private void OrderStates()
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        _editorItem.States = _editorItem.States
-            .OrderBy(s => s.Value.MinimumHealth)
-            .ThenBy(s => s.Value.MaximumHealth)
-            .ToDictionary(p => p.Key, p => p.Value);
-
-        var selectedItem = (Guid?)lstStates.SelectedValue;
-
-        _stateList.Clear();
-        foreach (var state in _editorItem.States.Values)
-        {
-            _stateList.Add(state);
-        }
-
-        if (selectedItem.HasValue && (Guid?)lstStates.SelectedValue != selectedItem)
-        {
-            lstStates.SelectedValue = selectedItem.Value;
-        }
-    }
-
-    private void UpdateStateControls()
-    {
-        if (!TryGetCurrentState(out var currentState))
-        {
-            return;
-        }
-
-        cmbTextureType.SelectedIndex = (int)currentState.TextureType;
-        chkRenderBelowEntity.Checked = currentState.RenderBelowEntities;
-        nudStateRangeMin.Value = currentState.MinimumHealth;
-        nudStateRangeMax.Value = currentState.MaximumHealth;
-        UpdateGraphicFileControl(currentState);
-    }
-
-    private void UpdateGraphicFileControl(ResourceStateDescriptor currentState)
-    {
-        cmbTextureSource.Items.Clear();
-        cmbTextureSource.Items.Add(Strings.General.None);
-        cmbAnimation.Items.Clear();
-        cmbAnimation.Items.Add(Strings.General.None);
-
-        if (currentState.TextureType == ResourceTextureSource.Animation)
-        {
-            cmbTextureSource.Enabled = false;
-            picResource.Visible = false;
-            cmbAnimation.Enabled = true;
-            cmbAnimation.Items.AddRange(AnimationDescriptor.Names);
-            cmbAnimation.SelectedIndex = AnimationDescriptor.ListIndex(currentState.AnimationId) + 1;
-            return;
-        }
-
-        cmbTextureSource.Enabled = true;
-        picResource.Visible = true;
-        cmbAnimation.Enabled = false;
-
-        var resources = GameContentManager.GetSmartSortedTextureNames(
-            currentState.TextureType == ResourceTextureSource.Tileset
-                ? GameContentManager.TextureType.Tileset
-                : GameContentManager.TextureType.Resource
-        );
-
-        cmbTextureSource.Items.AddRange(resources);
-
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        if (currentState.TextureName != null && cmbTextureSource.Items.Contains(currentState.TextureName))
-        {
-            cmbTextureSource.SelectedIndex = cmbTextureSource.FindString(TextUtils.NullToNone(currentState.TextureName));
-            return;
-        }
-
-        cmbTextureSource.SelectedIndex = 0;
-    }
-
-    private void Render(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        if (_graphicBitmap is null)
-        {
-            return;
-        }
-
-        if (_resourceGraphic is null)
-        {
-            return;
-        }
-
-        if (!TryGetCurrentState(out var currentState))
-        {
-            return;
-        }
-
-        if (currentState.TextureName is null)
-        {
-            return;
-        }
-
-        if (currentState.TextureType == ResourceTextureSource.Animation)
-        {
-            return;
-        }
-
-        var gfx = Graphics.FromImage(_graphicBitmap);
-        gfx.FillRectangle(Brushes.Black, new Rectangle(0, 0, picResource.Width, picResource.Height));
-
-        if (cmbTextureSource.SelectedIndex > 0 && cmbTextureSource.SelectedIndex > 0)
-        {
-            gfx.DrawImage(
-                _resourceGraphic,
-                new Rectangle(0, 0, _resourceGraphic.Width, _resourceGraphic.Height),
-                new Rectangle(0, 0, _resourceGraphic.Width, _resourceGraphic.Height),
-                GraphicsUnit.Pixel
-            );
-        }
-
-        if (currentState.TextureType == ResourceTextureSource.Tileset)
-        {
-            var selX = currentState.X;
-            var selY = currentState.Y;
-            var selW = currentState.Width;
-            var selH = currentState.Height;
-
-            if (selW < 0)
-            {
-                selX -= Math.Abs(selW);
-                selW = Math.Abs(selW);
-            }
-
-            if (selH < 0)
-            {
-                selY -= Math.Abs(selH);
-                selH = Math.Abs(selH);
-            }
-
-            var tileWidth = Options.Instance.Map.TileWidth;
-            var tileHeight = Options.Instance.Map.TileHeight;
-
-            gfx.DrawRectangle(
-                new Pen(System.Drawing.Color.White, 2f),
-                new Rectangle(
-                    selX * tileWidth,
-                    selY * tileHeight,
-                    tileWidth + selW * tileWidth,
-                    tileHeight + selH * tileHeight
-                )
-            );
-        }
-
-        gfx.Dispose();
-        gfx = picResource.CreateGraphics();
-        gfx.DrawImageUnscaled(_graphicBitmap, new System.Drawing.Point(0, 0));
-        gfx.Dispose();
-    }
-
-    #endregion
-
-    #region Form Events
-
-    private void txtName_TextChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        _editorItem.Name = txtName.Text;
-        lstGameObjects.UpdateText(txtName.Text);
-    }
-
-    private void cmbToolType_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        _editorItem.Tool = cmbToolType.SelectedIndex - 1;
-    }
-
-    private void nudMinHp_ValueChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        _editorItem.MinHp = (int)nudMinHp.Value;
-    }
-
-    private void nudMaxHp_ValueChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        _editorItem.MaxHp = (int)nudMaxHp.Value;
-    }
-
-    private void nudSpawnDuration_ValueChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        _editorItem.SpawnDuration = (int)nudSpawnDuration.Value;
-    }
-
-    private void cmbDeathAnimation_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        _editorItem.DeathAnimation = AnimationDescriptor.Get(AnimationDescriptor.IdFromList(cmbDeathAnimation.SelectedIndex - 1));
-    }
-
-    private void chkWalkableBefore_CheckedChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        _editorItem.WalkableBefore = chkWalkableBefore.Checked;
-    }
-
-    private void chkWalkableAfter_CheckedChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        _editorItem.WalkableAfter = chkWalkableAfter.Checked;
-    }
-
-    private void chkUseExplicitMaxHealthForResourceStates_CheckedChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        _editorItem.UseExplicitMaxHealthForResourceStates = chkUseExplicitMaxHealthForResourceStates.Checked;
-    }
-
-    private void lstDrops_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        if (lstDrops.SelectedIndex > -1)
-        {
-            cmbDropItem.SelectedIndex = ItemDescriptor.ListIndex(_editorItem.Drops[lstDrops.SelectedIndex].ItemId) + 1;
-            nudDropMaxAmount.Value = _editorItem.Drops[lstDrops.SelectedIndex].MaxQuantity;
-            nudDropMinAmount.Value = _editorItem.Drops[lstDrops.SelectedIndex].MinQuantity;
-            nudDropChance.Value = (decimal)_editorItem.Drops[lstDrops.SelectedIndex].Chance;
-        }
-    }
-
-    private void cmbDropItem_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        int index = lstDrops.SelectedIndex;
-        if (index < 0 || index > lstDrops.Items.Count)
-        {
-            return;
-        }
-
-        _editorItem.Drops[index].ItemId = ItemDescriptor.IdFromList(cmbDropItem.SelectedIndex - 1);
-        _dropList[index].ItemId = _editorItem.Drops[index].ItemId;
-    }
-
-    private void nudDropMaxAmount_ValueChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        int index = lstDrops.SelectedIndex;
-        if (index < 0 || index > lstDrops.Items.Count)
-        {
-            return;
-        }
-
-        _editorItem.Drops[index].MaxQuantity = (int)nudDropMaxAmount.Value;
-        _dropList[index].MaxQuantity = _editorItem.Drops[index].MaxQuantity;
-    }
-
-    private void nudDropMinAmount_ValueChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        int index = lstDrops.SelectedIndex;
-        if (index < 0 || index > lstDrops.Items.Count)
-        {
-            return;
-        }
-
-        _editorItem.Drops[index].MinQuantity = (int)nudDropMinAmount.Value;
-        _dropList[index].MinQuantity = _editorItem.Drops[index].MinQuantity;
-    }
-
-    private void nudDropChance_ValueChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        int index = lstDrops.SelectedIndex;
-        if (index < 0 || index > lstDrops.Items.Count)
-        {
-            return;
-        }
-
-        _editorItem.Drops[index].Chance = (double)nudDropChance.Value;
-        _dropList[index].Chance = _editorItem.Drops[index].Chance;
-    }
-
-    private void btnDropAdd_Click(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        var drop = new Drop()
-        {
-            ItemId = ItemDescriptor.IdFromList(cmbDropItem.SelectedIndex - 1),
-            MaxQuantity = (int)nudDropMaxAmount.Value,
-            MinQuantity = (int)nudDropMinAmount.Value,
-            Chance = (double)nudDropChance.Value
-        };
-
-        _editorItem.Drops.Add(drop);
-
-        _dropList.Add(new NotifiableDrop
-        {
-            ItemId = drop.ItemId,
-            MinQuantity = drop.MinQuantity,
-            MaxQuantity = drop.MaxQuantity,
-            Chance = drop.Chance
-        });
-
-        lstDrops.SelectedIndex = lstDrops.Items.Count - 1;
-    }
-
-    private void btnDropRemove_Click(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        if (lstDrops.SelectedIndex < 0)
-        {
-            return;
-        }
-
-        var index = lstDrops.SelectedIndex;
-        _editorItem.Drops.RemoveAt(index);
-        _dropList.RemoveAt(index);
-    }
-
-    private void nudHpRegen_ValueChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        _editorItem.VitalRegen = (int)nudHpRegen.Value;
-    }
-
-    private void cmbEvent_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        _editorItem.Event = EventDescriptor.Get(EventDescriptor.IdFromList(cmbEvent.SelectedIndex - 1));
-    }
-
-    private void btnRequirements_Click(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        var frm = new FrmDynamicRequirements(_editorItem.HarvestingRequirements, RequirementType.Resource);
-        frm.ShowDialog();
-    }
-
-    private void txtCannotHarvest_TextChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        _editorItem.CannotHarvestMessage = txtCannotHarvest.Text;
-    }
-
-    private void lstStates_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        if (lstStates.SelectedIndex < 0)
-        {
-            return;
-        }
-
-        UpdateStateControls();
-    }
-
-    private void btnAddState_Click(object sender, EventArgs e)
-    {
-        //alert if name is less than 3 characters
-        if (txtStateName.Text.Length <= 0)
-        {
-            DarkMessageBox.ShowError(
-                Strings.ResourceEditor.StateNameError,
-                Strings.ResourceEditor.StateErrorTitle
-            );
-            return;
-        }
-
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        var state = new ResourceStateDescriptor
-        {
-            Id = Guid.NewGuid(),
-            Name = txtStateName.Text,
-        };
-
-        _editorItem.States.Add(state.Id, state);
-        _stateList.Add(state);
-        OrderStates();
-        lstStates.SelectedIndex = lstStates.Items.IndexOf(state.Name);
-        txtStateName.Text = string.Empty;
-    }
-
-    private void btnRemoveState_Click(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        var selectedIndex = lstStates.SelectedIndex;
-        if (selectedIndex < 0)
-        {
-            return;
-        }
-
-        var stateKey = _editorItem.States.Keys.ToList()[selectedIndex];
-        if (!_editorItem.States.TryGetValue(stateKey, out _))
-        {
-            return;
-        }
-
-        _editorItem.States.Remove(stateKey);
-        _stateList.RemoveAt(selectedIndex);
-        OrderStates();
-        if (lstStates.Items.Count > 0)
-        {
-            lstStates.SelectedIndex = 0;
-        }
-    }
-
-    private void cmbGraphicType_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        if (!TryGetCurrentState(out var currentState))
-        {
-            return;
-        }
-
-        currentState.TextureType = (ResourceTextureSource)cmbTextureType.SelectedIndex;
-        UpdateGraphicFileControl(currentState);
-    }
-
-    private void chkRenderBelowEntity_CheckedChanged(object sender, EventArgs e)
-    {
-        if (!TryGetCurrentState(out var currentState))
-        {
-            return;
-        }
-
-        currentState.RenderBelowEntities = chkRenderBelowEntity.Checked;
-    }
-
-    private void cmbGraphicFile_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        _resourceGraphic?.Dispose();
-        _resourceGraphic = null;
-
-        if (!TryGetCurrentState(out var currentState))
-        {
-            return;
-        }
-
-        if (cmbTextureSource.SelectedIndex > 0)
-        {
-            currentState.TextureName = cmbTextureSource.Text;
-            var graphic = Path.Combine(
-                "resources", currentState.TextureType == ResourceTextureSource.Tileset ? "tilesets" : "resources", cmbTextureSource.Text
-            );
-
-            if (File.Exists(graphic))
-            {
-                _resourceGraphic = (Bitmap)Image.FromFile(graphic);
-                picResource.Width = _resourceGraphic.Width;
-                picResource.Height = _resourceGraphic.Height;
-                _graphicBitmap = new Bitmap(picResource.Width, picResource.Height);
-            }
-        }
-        else
-        {
-            currentState.TextureName = null;
-        }
-
-        picResource.Visible = _resourceGraphic != null;
-    }
-
-    private void cmbAnimation_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        if (!TryGetCurrentState(out var currentState))
-        {
-            return;
-        }
-
-        currentState.AnimationId = AnimationDescriptor.IdFromList(cmbAnimation.SelectedIndex - 1);
-    }
-
-    private void nudStateRangeMin_ValueChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        if (!TryGetCurrentState(out var currentState))
-        {
-            return;
-        }
-
-        currentState.MinimumHealth = (int)nudStateRangeMin.Value;
-        OrderStates();
-    }
-
-    private void nudStateRangeMax_ValueChanged(object sender, EventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        if (!TryGetCurrentState(out var currentState))
-        {
-            return;
-        }
-
-        currentState.MaximumHealth = (int)nudStateRangeMax.Value;
-        OrderStates();
-    }
-
-    private void picResource_MouseDown(object sender, MouseEventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        if (e.X > picResource.Width || e.Y > picResource.Height)
-        {
-            return;
-        }
-
-        if ((ResourceTextureSource)cmbTextureType.SelectedIndex != ResourceTextureSource.Tileset)
-        {
-            return;
-        }
-
-        if (!TryGetCurrentState(out var currentState))
-        {
-            return;
-        }
-
-        _mouseDown = true;
-        currentState.X = Math.Max(0, (int)Math.Floor((double)e.X / Options.Instance.Map.TileWidth));
-        currentState.Y = Math.Max(0, (int)Math.Floor((double)e.Y / Options.Instance.Map.TileHeight));
-        currentState.Width = 0;
-        currentState.Height = 0;
-    }
-
-    private void picResource_MouseUp(object sender, MouseEventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        if (e.X > picResource.Width || e.Y > picResource.Height)
-        {
-            return;
-        }
-
-        if ((ResourceTextureSource)cmbTextureType.SelectedIndex != ResourceTextureSource.Tileset)
-        {
-            return;
-        }
-
-        if (!TryGetCurrentState(out var currentState))
-        {
-            return;
-        }
-
-        var selX = currentState.X;
-        var selY = currentState.Y;
-        var selW = currentState.Width;
-        var selH = currentState.Height;
-
-        if (selW < 0)
-        {
-            selX -= Math.Abs(selW);
-            selW = Math.Abs(selW);
-        }
-
-        if (selH < 0)
-        {
-            selY -= Math.Abs(selH);
-            selH = Math.Abs(selH);
-        }
-
-        currentState.X = selX;
-        currentState.Y = selY;
-        currentState.Width = selW;
-        currentState.Height = selH;
-        _mouseDown = false;
-    }
-
-    private void picResource_MouseMove(object sender, MouseEventArgs e)
-    {
-        if (_editorItem is null)
-        {
-            return;
-        }
-
-        if (e.X > picResource.Width || e.Y > picResource.Height)
-        {
-            return;
-        }
-
-        if ((ResourceTextureSource)cmbTextureType.SelectedIndex != ResourceTextureSource.Tileset)
-        {
-            return;
-        }
-
-        if (!TryGetCurrentState(out var currentState))
-        {
-            return;
-        }
-
-        if (_mouseDown)
-        {
-            var tmpX = Math.Max(0, (int)Math.Floor((double)e.X / Options.Instance.Map.TileWidth));
-            var tmpY = Math.Max(0, (int)Math.Floor((double)e.Y / Options.Instance.Map.TileHeight));
-            currentState.Width = tmpX - currentState.X;
-            currentState.Height = tmpY - currentState.Y;
-        }
-    }
-
-    #endregion
-
-    #region "Item List - Folders, Searching, Sorting, Etc"
 
     public void InitEditor()
     {
-        //Collect folders
         var mFolders = new List<string>();
         foreach (var itm in ResourceDescriptor.Lookup)
         {
@@ -1115,84 +399,25 @@ public partial class FrmResource : EditorForm
 
         mFolders.Sort();
         _knownFolders.Sort();
-        cmbFolder.Items.Clear();
+        cmbFolder!.Items.Clear();
         cmbFolder.Items.Add("");
-        cmbFolder.Items.AddRange(_knownFolders.ToArray());
-
-        var items = ResourceDescriptor.Lookup.OrderBy(p => p.Value?.Name).Select(pair => new KeyValuePair<Guid, KeyValuePair<string, string>>(pair.Key,
-            new KeyValuePair<string, string>(((ResourceDescriptor)pair.Value)?.Name ?? Models.DatabaseObject<ResourceDescriptor>.Deleted, ((ResourceDescriptor)pair.Value)?.Folder ?? ""))).ToArray();
-        lstGameObjects.Repopulate(items, mFolders, btnAlphabetical.Checked, CustomSearch(), txtSearch.Text);
-    }
-
-    private void btnAddFolder_Click(object sender, EventArgs e)
-    {
-        var folderName = string.Empty;
-        var result = DarkInputBox.ShowInformation(
-            Strings.ResourceEditor.folderprompt, Strings.ResourceEditor.foldertitle, ref folderName,
-            DarkDialogButton.OkCancel
-        );
-
-        if (result == DialogResult.OK && !string.IsNullOrEmpty(folderName))
+        foreach (var folder in _knownFolders)
         {
-            if (!cmbFolder.Items.Contains(folderName))
+            cmbFolder.Items.Add(folder);
+        }
+
+        if (lstGameObjects != null)
+        {
+            lstGameObjects.Items.Clear();
+            var items = ResourceDescriptor.Lookup.OrderBy(p => p.Value?.Name);
+            foreach (var pair in items)
             {
-                _editorItem.Folder = folderName;
-                lstGameObjects.ExpandFolder(folderName);
-                InitEditor();
-                cmbFolder.Text = folderName;
+                var resource = (ResourceDescriptor?)pair.Value;
+                if (resource != null)
+                {
+                    lstGameObjects.Items.Add(new ListItem { Key = pair.Key.ToString(), Text = resource.Name ?? "Deleted" });
+                }
             }
         }
     }
-
-    private void cmbFolder_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        _editorItem.Folder = cmbFolder.Text;
-        InitEditor();
-    }
-
-    private void btnAlphabetical_Click(object sender, EventArgs e)
-    {
-        btnAlphabetical.Checked = !btnAlphabetical.Checked;
-        InitEditor();
-    }
-
-    private void txtSearch_TextChanged(object sender, EventArgs e)
-    {
-        InitEditor();
-    }
-
-    private void txtSearch_Leave(object sender, EventArgs e)
-    {
-        if (string.IsNullOrWhiteSpace(txtSearch.Text))
-        {
-            txtSearch.Text = Strings.ResourceEditor.searchplaceholder;
-        }
-    }
-
-    private void txtSearch_Enter(object sender, EventArgs e)
-    {
-        txtSearch.SelectAll();
-        txtSearch.Focus();
-    }
-
-    private void btnClearSearch_Click(object sender, EventArgs e)
-    {
-        txtSearch.Text = Strings.ResourceEditor.searchplaceholder;
-    }
-
-    private bool CustomSearch()
-    {
-        return !string.IsNullOrWhiteSpace(txtSearch.Text) &&
-               txtSearch.Text != Strings.ResourceEditor.searchplaceholder;
-    }
-
-    private void txtSearch_Click(object sender, EventArgs e)
-    {
-        if (txtSearch.Text == Strings.ResourceEditor.searchplaceholder)
-        {
-            txtSearch.SelectAll();
-        }
-    }
-
-    #endregion
 }

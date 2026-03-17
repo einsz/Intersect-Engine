@@ -1,4 +1,3 @@
-using Intersect.Editor.Forms;
 using Intersect.Editor.Localization;
 using Intersect.Enums;
 using Intersect.Extensions;
@@ -7,20 +6,13 @@ using Intersect.Framework.Core.GameObjects.Events;
 namespace Intersect.Editor.Utilities;
 public static class VariableSelectorUtils
 {
-    public static void OpenVariableSelector(Action<VariableSelection> onSelectionComplete, 
-        Guid selectedVariableId, 
+    public static void OpenVariableSelector(Action<object> onSelectionComplete,
+        Guid selectedVariableId,
         VariableType selectedVariableType,
         VariableDataType dataTypeFilter = 0)
     {
-        var variableSelection = new FrmVariableSelector(selectedVariableType, selectedVariableId, dataTypeFilter);
-        variableSelection.ShowDialog();
-
-        if (variableSelection.GetResult())
-        {
-            var selection = variableSelection.GetSelection();
-
-            onSelectionComplete.Invoke(selection);
-        }
+        // TODO: Implement VariableSelector when FrmVariableSelector is ported to Eto.Forms
+        throw new NotImplementedException("VariableSelector not yet ported to Eto.Forms");
     }
 
     public static string GetSelectedVarText(VariableType variableType, Guid selectedVariableId)

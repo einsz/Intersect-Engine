@@ -1,3 +1,4 @@
+using Intersect.Editor.Forms.Helpers;
 using System.ComponentModel;
 using System.Windows.Forms;
 using DarkUI.Controls;

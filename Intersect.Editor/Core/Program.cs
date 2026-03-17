@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using Eto.Forms;
 using Intersect.Editor.Forms;
 using Intersect.Editor.General;
 using Intersect.Editor.Localization;
@@ -19,23 +20,6 @@ namespace Intersect.Editor.Core;
 
 public static class Program
 {
-    private const string IconManifestResourceName = "Intersect.Editor.intersect-logo-qu.ico";
-    internal static readonly Icon? Icon;
-
-    static Program()
-    {
-        var iconStream = typeof(Program).Assembly.GetManifestResourceStream(IconManifestResourceName);
-        if (iconStream == default)
-        {
-            Console.Error.WriteLine($"Unable to find embedded resource with name '{IconManifestResourceName}'.");
-        }
-        else
-        {
-            Icon = new Icon(iconStream);
-            Console.WriteLine("Loaded embedded application icon successfully");
-        }
-    }
-
     /// <summary>
     ///     The main entry point for the application.
     /// </summary>
@@ -78,35 +62,47 @@ public static class Program
         ApplicationContext.CurrentContext.Logger.LogTrace("Starting editor...");
 
         AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
-        Application.ThreadException += Application_ThreadException;
-        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.Automatic);
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
 
         ApplicationContext.CurrentContext.Logger.LogTrace("Unpacking libraries...");
 
-        //Place sqlite3.dll where it's needed.
-        var dllname = Environment.Is64BitProcess ? "sqlite3x64.dll" : "sqlite3x86.dll";
-        using (var resourceStream = Assembly.GetExecutingAssembly()
-                   .GetManifestResourceStream("Intersect.Editor.Resources." + dllname))
+        // Skip sqlite3 unpacking on Linux - use system sqlite or bundled version
+        if (OperatingSystem.IsWindows())
         {
-            Debug.Assert(resourceStream != null, "resourceStream != null");
-            using (var fileStream = new FileStream("sqlite3.dll", FileMode.OpenOrCreate, FileAccess.ReadWrite))
+            var dllname = Environment.Is64BitProcess ? "sqlite3x64.dll" : "sqlite3x86.dll";
+            using (var resourceStream = Assembly.GetExecutingAssembly()
+                       .GetManifestResourceStream("Intersect.Editor.Resources." + dllname))
             {
-                var data = new byte[resourceStream.Length];
-                resourceStream.Read(data, 0, (int)resourceStream.Length);
-                fileStream.Write(data, 0, data.Length);
+                if (resourceStream != null)
+                {
+                    using (var fileStream = new FileStream("sqlite3.dll", FileMode.OpenOrCreate, FileAccess.ReadWrite))
+                    {
+                        var data = new byte[resourceStream.Length];
+                        resourceStream.Read(data, 0, (int)resourceStream.Length);
+                        fileStream.Write(data, 0, data.Length);
+                    }
+                }
             }
         }
 
         ApplicationContext.CurrentContext.Logger.LogTrace("Libraries unpacked.");
 
         ApplicationContext.CurrentContext.Logger.LogTrace("Creating forms...");
-        Globals.UpdateForm = new FrmUpdate();
-        ApplicationContext.CurrentContext.Logger.LogTrace("Forms created.");
 
-        ApplicationContext.CurrentContext.Logger.LogTrace("Starting application.");
-        Application.Run(Globals.UpdateForm);
+        // Initialize GTK platform for Eto.Forms on Linux
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsFreeBSD())
+        {
+            Eto.Platform.Initialize(Eto.Platforms.Gtk);
+        }
+
+        var app = new Eto.Forms.Application();
+        app.Initialized += (sender, e) =>
+        {
+            ApplicationContext.CurrentContext.Logger.LogTrace("Starting application.");
+            Globals.UpdateForm = new FrmUpdate();
+            Globals.UpdateForm.Show();
+        };
+
+        app.Run();
     }
 
     private static void Application_ThreadException(object sender, ThreadExceptionEventArgs e)

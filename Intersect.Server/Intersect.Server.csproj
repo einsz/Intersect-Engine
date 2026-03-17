@@ -83,8 +83,12 @@
   </ItemGroup>
 
   <ItemGroup Label="Embedded Resources">
-    <EmbeddedResource Include="$(NetworkHandshakePublicKey)" />
-    <EmbeddedResource Include="$(NetworkHandshakePrivateKey)" />
+    <EmbeddedResource Include="$(NetworkHandshakePublicKey)">
+      <LogicalName>Intersect.Server.network.handshake.bkey.pub</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="$(NetworkHandshakePrivateKey)">
+      <LogicalName>Intersect.Server.network.handshake.bkey</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </EmbeddedResource>

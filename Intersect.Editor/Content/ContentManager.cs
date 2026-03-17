@@ -1,3 +1,5 @@
+using System.Drawing;
+using Eto.Forms;
 using Intersect.Editor.Core;
 using Intersect.Editor.Localization;
 using Intersect.Editor.Networking;
@@ -100,9 +102,8 @@ public static partial class GameContentManager
     {
         if (!Directory.Exists("resources"))
         {
-            MessageBox.Show(
-                Strings.Errors.resourcesnotfound, Strings.Errors.resourcesnotfoundtitle, MessageBoxButtons.OK,
-                MessageBoxIcon.Error
+            Eto.Forms.MessageBox.Show(
+                Strings.Errors.resourcesnotfound, Strings.Errors.resourcesnotfoundtitle, MessageBoxButtons.OK
             );
 
             Environment.Exit(1);
@@ -240,9 +241,11 @@ public static partial class GameContentManager
 
                 if (!tilesetWarning)
                 {
-                    using (var img = Image.FromFile("resources/tilesets/" + tileset.Name))
+                    var tilesetPath = "resources/tilesets/" + tileset.Name;
+                    if (File.Exists(tilesetPath))
                     {
-                        if (img.Width > 2048 || img.Height > 2048)
+                        var (width, height) = GetImageDimensions(tilesetPath);
+                        if (width > 2048 || height > 2048)
                         {
                             badTilesets.Add(tileset.Name);
                         }
@@ -253,10 +256,9 @@ public static partial class GameContentManager
 
         if (badTilesets.Count > 0)
         {
-            MessageBox.Show(
+            Eto.Forms.MessageBox.Show(
                 "One or more tilesets is too large and likely won't load for your players on older machines! We recommmend that no graphic is larger than 2048 pixels in width or height.\n\nFaulting tileset(s): " +
-                string.Join(",", badTilesets.ToArray()), "Large Tileset Warning!", MessageBoxButtons.OK,
-                MessageBoxIcon.Exclamation
+                string.Join(",", badTilesets.ToArray()), "Large Tileset Warning!", MessageBoxButtons.OK
             );
         }
 
@@ -325,27 +327,40 @@ public static partial class GameContentManager
 
     public static void LoadShaders()
     {
-        sShaderDict.Clear();
-
-        const string shaderPrefix = "Intersect.Editor.Resources.Shaders.";
-        var availableShaders = typeof(GameContentManager).Assembly
-            .GetManifestResourceNames()
-            .Where(resourceName =>
-                resourceName.StartsWith(shaderPrefix)
-                && resourceName.EndsWith(".xnb")
-            ).ToArray();
-
-        for (var i = 0; i < availableShaders.Length; i++)
+        // Shader loading requires a GraphicsDevice, skip if not available
+        if (Core.Graphics.GetGraphicsDevice() == null)
         {
-            var resourceFullName = availableShaders[i];
-            var shaderName = resourceFullName.Substring(shaderPrefix.Length);
+            return;
+        }
 
-            using (var resourceStream = typeof(GameContentManager).Assembly.GetManifestResourceStream(resourceFullName))
+        try
+        {
+            sShaderDict.Clear();
+
+            const string shaderPrefix = "Intersect.Editor.Resources.Shaders.";
+            var availableShaders = typeof(GameContentManager).Assembly
+                .GetManifestResourceNames()
+                .Where(resourceName =>
+                    resourceName.StartsWith(shaderPrefix)
+                    && resourceName.EndsWith(".xnb")
+                ).ToArray();
+
+            for (var i = 0; i < availableShaders.Length; i++)
             {
-                var extractedPath = FileSystemHelper.WriteToTemporaryFolder(resourceFullName, resourceStream);
-                var shader = sContentManger.Load<Effect>(Path.ChangeExtension(extractedPath, null));
-                sShaderDict.Add(shaderName, shader);
+                var resourceFullName = availableShaders[i];
+                var shaderName = resourceFullName.Substring(shaderPrefix.Length);
+
+                using (var resourceStream = typeof(GameContentManager).Assembly.GetManifestResourceStream(resourceFullName))
+                {
+                    var extractedPath = FileSystemHelper.WriteToTemporaryFolder(resourceFullName, resourceStream);
+                    var shader = sContentManger.Load<Effect>(Path.ChangeExtension(extractedPath, null));
+                    sShaderDict.Add(shaderName, shader);
+                }
             }
+        }
+        catch (Exception ex)
+        {
+            Intersect.Core.ApplicationContext.CurrentContext?.Logger?.LogWarning(ex, "Failed to load shaders (GraphicsDevice may not be available)");
         }
     }
 
@@ -640,6 +655,48 @@ public static partial class GameContentManager
         Array.Sort(sortedStrings, new AlphanumComparator());
 
         return sortedStrings;
+    }
+
+    /// <summary>
+    /// Read image dimensions from PNG/BMP file headers without System.Drawing
+    /// </summary>
+    private static (int width, int height) GetImageDimensions(string path)
+    {
+        try
+        {
+            using var stream = File.OpenRead(path);
+            var header = new byte[32];
+            if (stream.Read(header, 0, 26) < 26)
+                return (0, 0);
+
+            // PNG signature: 89 50 4E 47 0D 0A 1A 0A
+            if (header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47)
+            {
+                // PNG: width and height are at offset 16 (big-endian 4-byte integers)
+                stream.Position = 16;
+                stream.Read(header, 0, 8);
+                int width = (header[0] << 24) | (header[1] << 16) | (header[2] << 8) | header[3];
+                int height = (header[4] << 24) | (header[5] << 16) | (header[6] << 8) | header[7];
+                return (width, height);
+            }
+
+            // BMP signature: BM
+            if (header[0] == 0x42 && header[1] == 0x4D)
+            {
+                // BMP: width at offset 18, height at offset 22 (little-endian)
+                stream.Position = 18;
+                stream.Read(header, 0, 8);
+                int width = header[0] | (header[1] << 8) | (header[2] << 16) | (header[3] << 24);
+                int height = header[4] | (header[5] << 8) | (header[6] << 16) | (header[7] << 24);
+                return (width, Math.Abs(height));
+            }
+        }
+        catch
+        {
+            // If we can't read dimensions, assume it's OK
+        }
+
+        return (0, 0);
     }
 
 }

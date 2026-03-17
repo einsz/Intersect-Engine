@@ -1,34 +1,83 @@
-﻿using DarkUI.Controls;
+using Eto.Forms;
+using Eto.Drawing;
 using Intersect.Collections;
 using Intersect.Models;
 
 namespace Intersect.Editor.Forms.Controls;
 
-
-public partial class SearchableDarkTreeView : UserControl
+public partial class SearchableDarkTreeView : Panel
 {
-
-    private readonly Dictionary<Guid, DarkTreeNode> mIdNodeLookup;
-
+    private readonly Dictionary<Guid, TreeGridItem> mIdNodeLookup;
     private IGameObjectLookup<IDatabaseObject> mItemProvider;
-
     private string mPreviousSearchText;
+
+    protected TextBox txtSearch;
+    protected TreeGridView treeViewItems;
 
     public SearchableDarkTreeView()
     {
-        InitializeComponent();
+        mIdNodeLookup = new Dictionary<Guid, TreeGridItem>();
 
-        mIdNodeLookup = new Dictionary<Guid, DarkTreeNode>();
+        txtSearch = new TextBox
+        {
+            PlaceholderText = "Search..."
+        };
+
+        treeViewItems = new TreeGridView
+        {
+            ShowHeader = false,
+            AllowMultipleSelection = false
+        };
+
+        var nameColumn = new GridColumn
+        {
+            HeaderText = "Name",
+            DataCell = new TextBoxCell(0),
+            AutoSize = true,
+            Editable = false,
+            Expand = true
+        };
+
+        treeViewItems.Columns.Add(nameColumn);
+
+        treeViewItems.DataStore = new TreeGridItemCollection();
+
+        txtSearch.TextChanged += TxtSearch_TextChanged;
+
+        Content = new StackLayout
+        {
+            Orientation = Orientation.Vertical,
+            Spacing = 5,
+            Padding = new Padding(5),
+            Items =
+            {
+                txtSearch,
+                new StackLayoutItem(treeViewItems, expand: true)
+            }
+        };
     }
 
-    public DarkTreeNode SelectedNode => treeViewItems?.SelectedNodes?.FirstOrDefault();
+    public TreeGridItem SelectedNode
+    {
+        get
+        {
+            var selected = treeViewItems?.SelectedItem;
+            return selected as TreeGridItem;
+        }
+    }
 
     public IObject SelectedObject => SelectedNode?.Tag as IObject;
 
     public Guid SelectedId
     {
         get => SelectedObject?.Id ?? Guid.Empty;
-        set => treeViewItems?.SelectNode(mIdNodeLookup.TryGetValue(value, out var node) ? node : null);
+        set
+        {
+            if (mIdNodeLookup.TryGetValue(value, out var node))
+            {
+                treeViewItems.SelectedItem = node;
+            }
+        }
     }
 
     public IGameObjectLookup<IDatabaseObject> ItemProvider
@@ -37,14 +86,13 @@ public partial class SearchableDarkTreeView : UserControl
         set
         {
             mItemProvider = value;
-
             UpdateNodes();
         }
     }
 
     public string SearchText
     {
-        get => txtSearch?.Text;
+        get => txtSearch?.Text ?? string.Empty;
         set
         {
             if (txtSearch == null)
@@ -56,7 +104,7 @@ public partial class SearchableDarkTreeView : UserControl
         }
     }
 
-    public virtual void Refresh()
+    public virtual new void Refresh()
     {
         UpdateNodes();
     }
@@ -88,17 +136,18 @@ public partial class SearchableDarkTreeView : UserControl
         return FilterBySearchText(pair.Value);
     }
 
-    protected virtual DarkTreeNode ObjectAsNode(IDatabaseObject databaseObject)
+    protected virtual TreeGridItem ObjectAsNode(IDatabaseObject databaseObject)
     {
         if (!mIdNodeLookup.TryGetValue(databaseObject.Id, out var node))
         {
-            node = new DarkTreeNode(databaseObject.Name ?? "NULL");
+            node = new TreeGridItem(databaseObject.Name ?? "NULL");
+            node.Tag = databaseObject;
         }
 
         return node;
     }
 
-    protected virtual DarkTreeNode PairAsNode(KeyValuePair<Guid, IDatabaseObject> pair)
+    protected virtual TreeGridItem PairAsNode(KeyValuePair<Guid, IDatabaseObject> pair)
     {
         return ObjectAsNode(
             pair.Value ??
@@ -108,13 +157,12 @@ public partial class SearchableDarkTreeView : UserControl
 
     protected void UpdateNodes()
     {
-        treeViewItems?.Nodes?.Clear();
-
-        // TODO: Remove this when we fix DarkUI, which currently does not invalidate (and will show stale values when the list is emptied).
-        treeViewItems?.Invalidate();
+        var collection = new TreeGridItemCollection();
+        mIdNodeLookup.Clear();
 
         if (ItemProvider == null)
         {
+            treeViewItems.DataStore = collection;
             return;
         }
 
@@ -124,12 +172,17 @@ public partial class SearchableDarkTreeView : UserControl
             ? ItemProvider
             : ItemProvider.Where(FilterBySearchText);
 
-        var nodes = filtered.Select(PairAsNode).ToList();
+        foreach (var pair in filtered)
+        {
+            var node = PairAsNode(pair);
+            mIdNodeLookup[pair.Key] = node;
+            collection.Add(node);
+        }
 
-        treeViewItems?.Nodes?.AddRange(nodes);
+        treeViewItems.DataStore = collection;
     }
 
-    private void txtSearch_TextChanged(object sender, EventArgs e)
+    private void TxtSearch_TextChanged(object sender, EventArgs e)
     {
         var searchText = SearchText?.Trim() ?? "";
         var previousSearchText = mPreviousSearchText?.Trim() ?? "";
@@ -141,9 +194,4 @@ public partial class SearchableDarkTreeView : UserControl
 
         UpdateNodes();
     }
-
-    private void toolStripCreate_Click(object sender, EventArgs e)
-    {
-    }
-
 }

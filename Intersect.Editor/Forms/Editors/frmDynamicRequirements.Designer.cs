@@ -1,3 +1,4 @@
+using Intersect.Editor.Forms.Helpers;
 ﻿namespace Intersect.Editor.Forms.Editors
 {
     partial class FrmDynamicRequirements

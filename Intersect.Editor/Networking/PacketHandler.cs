@@ -1,3 +1,4 @@
+using Eto.Forms;
 using Intersect.Core;
 using Intersect.Editor.Content;
 using Intersect.Editor.Core;
@@ -175,7 +176,7 @@ internal sealed partial class PacketHandler
 
             if (Globals.CurrentMap == existingMapToDelete)
             {
-                Globals.MainForm.EnterMap(MapList.List.FindFirstMap());
+                Globals.MainForm?.EnterMap(MapList.List.FindFirstMap());
             }
 
             existingMapToDelete.Delete();
@@ -206,10 +207,14 @@ internal sealed partial class PacketHandler
         }
 
         MapInstance.Lookup.Set(packet.MapId, receivedMap);
-        if (!Globals.InEditor && Globals.HasGameData)
+        // Console.WriteLine($"MapPacket received: {packet.MapId}");
+
+        if (!Globals.InEditor && Globals.HasGameData && !Globals.EditorLoopStarted)
         {
             Globals.CurrentMap = receivedMap;
-            Globals.LoginForm.BeginInvoke(Globals.LoginForm.EditorLoopDelegate);
+            // Console.WriteLine($"Starting editor loop from MapPacket handler");
+            Application.Instance.Invoke(() => Globals.LoginForm.EditorLoopDelegate());
+            Globals.EditorLoopStarted = true;
         }
         else if (Globals.InEditor)
         {
@@ -231,9 +236,7 @@ internal sealed partial class PacketHandler
                         if (Globals.MapsToFetch.Count == 0)
                         {
                             Globals.FetchingMapPreviews = false;
-                            Globals.PreviewProgressForm.BeginInvoke(
-                                (MethodInvoker) delegate { Globals.PreviewProgressForm.Dispose(); }
-                            );
+                            Application.Instance.Invoke(() => Globals.PreviewProgressForm?.Close());
                         }
                         else
                         {
@@ -261,6 +264,13 @@ internal sealed partial class PacketHandler
 
             Globals.CurrentMap = MapInstance.Get(Globals.LoadingMap);
             MapUpdatedDelegate();
+
+            // Initialize the map editor for rendering
+            Application.Instance.Invoke(() =>
+            {
+                Globals.MapEditorWindow?.InitMapEditor();
+                Core.Graphics.InvalidateMap();
+            });
             if (receivedMap.Up != Guid.Empty)
             {
                 PacketSender.SendNeedMap(receivedMap.Up);
@@ -298,13 +308,15 @@ internal sealed partial class PacketHandler
             return;
         }
 
-        if (!mapGrid.Loaded)
+        // Process the map even if the grid isn't fully loaded yet
+        // The grid will be loaded shortly after, and the map data is valid
+        if (!mapGrid.Loaded && packet.MapId != currentMap.Id)
         {
-            ApplicationContext.CurrentContext.Logger.LogError(
-                "Received packet for map {MapId} before the map grid was loaded",
+            ApplicationContext.CurrentContext.Logger.LogDebug(
+                "Received packet for map {MapId} before the map grid was loaded, queuing for later",
                 packet.MapId
             );
-            return;
+            // Still process the packet - it's valid data
         }
 
         if (currentMap.Id != packet.MapId)
@@ -315,6 +327,11 @@ internal sealed partial class PacketHandler
                 currentMap.Id,
                 currentMap.Name
             );
+            return;
+        }
+
+        if (mapGrid.Grid == null || mapGrid.GridHeight <= 0 || mapGrid.GridWidth <= 0)
+        {
             return;
         }
 
@@ -332,13 +349,19 @@ internal sealed partial class PacketHandler
                     continue;
                 }
 
-                var gridMapId = mapGrid.Grid[x, y].MapId;
+                var gridItem = mapGrid.Grid?[x, y];
+                if (gridItem == null)
+                {
+                    continue;
+                }
+
+                var gridMapId = gridItem.MapId;
                 if (gridMapId == Guid.Empty)
                 {
                     continue;
                 }
 
-                if (MapInstance.TryGet(gridMapId, out _))
+                if (MapInstance.TryGet(gridMapId, out MapDescriptor _))
                 {
                     continue;
                 }
@@ -351,15 +374,25 @@ internal sealed partial class PacketHandler
     //GameDataPacket
     public void HandlePacket(IPacketSender packetSender, GameDataPacket packet)
     {
+        // Console.WriteLine($"GameDataPacket received");
+
         foreach (var obj in packet.GameObjects)
         {
             HandlePacket(packetSender, obj);
         }
 
         Globals.HasGameData = true;
-        if (!Globals.InEditor && Globals.HasGameData && Globals.CurrentMap != null)
+        Console.WriteLine($"GameData loaded, InEditor={Globals.InEditor}, CurrentMap={Globals.CurrentMap?.Id}");
+
+        if (!Globals.InEditor && Globals.HasGameData && Globals.CurrentMap != null && !Globals.EditorLoopStarted)
         {
-            Globals.LoginForm.BeginInvoke(Globals.LoginForm.EditorLoopDelegate);
+            Console.WriteLine("Starting editor loop from GameDataPacket handler");
+            Application.Instance.Invoke(() => Globals.LoginForm.EditorLoopDelegate());
+            Globals.EditorLoopStarted = true;
+        }
+        else
+        {
+            // Console.WriteLine($"Editor loop not started yet: InEditor={Globals.InEditor}, HasGameData={Globals.HasGameData}, CurrentMap={Globals.CurrentMap != null}");
         }
 
         GameContentManager.LoadTilesets();
@@ -368,7 +401,7 @@ internal sealed partial class PacketHandler
     //EnterMapPacket
     public void HandlePacket(IPacketSender packetSender, EnterMapPacket packet)
     {
-        Globals.MainForm.BeginInvoke((Action) (() => Globals.MainForm.EnterMap(packet.MapId)));
+        Application.Instance.Invoke(() => Globals.MainForm?.EnterMap(packet.MapId));
     }
 
     //MapListPacket
@@ -389,30 +422,30 @@ internal sealed partial class PacketHandler
                 var storedMapId = Guid.Parse(storedPreference);
                 if (storedMapId != Guid.Empty && MapList.List.FindMap(storedMapId) != null)
                 {
-                    Globals.MainForm.EnterMap(storedMapId);
+                    Globals.MainForm?.EnterMap(storedMapId);
                 }
                 // No longer exists, so just load the first.
                 else
                 {
-                    Globals.MainForm.EnterMap(firstMap);
+                    Globals.MainForm?.EnterMap(firstMap);
                 }
             }
             // Invalid Id, so load the first map.
             else
             {
-                Globals.MainForm.EnterMap(firstMap);
+                Globals.MainForm?.EnterMap(firstMap);
             }
             
         }
 
-        Globals.MapListWindow.BeginInvoke(Globals.MapListWindow.mapTreeList.MapListDelegate, Guid.Empty, null);
-        Globals.MapPropertiesWindow?.BeginInvoke(Globals.MapPropertiesWindow.UpdatePropertiesDelegate);
+        // Update map list (delegate not available in Eto.Forms version)
+        Application.Instance.Invoke(() => Globals.MapPropertiesWindow?.UpdatePropertiesDelegate());
     }
 
     //ErrorMessagePacket
     public void HandlePacket(IPacketSender packetSender, ErrorMessagePacket packet)
     {
-        MessageBox.Show(packet.Error, packet.Header, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        MessageBox.Show(packet.Error, packet.Header, MessageBoxType.Error);
     }
 
     //MapGridPacket
@@ -746,7 +779,21 @@ internal sealed partial class PacketHandler
     //OpenEditorPacket
     public void HandlePacket(IPacketSender packetSender, OpenEditorPacket packet)
     {
-        Globals.MainForm.BeginInvoke(Globals.MainForm.EditorDelegate, packet.Type);
+        Console.WriteLine($"OpenEditorPacket received: {packet.Type}");
+        Console.WriteLine($"OpenEditorDelegate is {(Globals.OpenEditorDelegate == null ? "null" : "set")}");
+        Application.Instance.Invoke(() =>
+        {
+            try
+            {
+                Globals.OpenEditorDelegate?.Invoke(packet.Type);
+                Console.WriteLine($"Editor opened for {packet.Type}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error opening editor: {ex.Message}");
+                Globals.CurrentEditor = -1;
+            }
+        });
     }
 
     //TimeDataPacket

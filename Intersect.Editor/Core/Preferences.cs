@@ -1,12 +1,71 @@
+using System.Text.Json;
 using Intersect.Configuration;
-using Microsoft.Win32;
 
 namespace Intersect.Editor.Core;
-
 
 public static partial class Preferences
 {
     private static bool? _enableCursorSprites;
+
+    private static readonly string PreferencesFilePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "IntersectEditor",
+        "preferences.json"
+    );
+
+    private static Dictionary<string, string>? _preferences;
+
+    private static Dictionary<string, string> LoadPreferences()
+    {
+        if (_preferences != null)
+        {
+            return _preferences;
+        }
+
+        try
+        {
+            var dir = Path.GetDirectoryName(PreferencesFilePath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            if (File.Exists(PreferencesFilePath))
+            {
+                var json = File.ReadAllText(PreferencesFilePath);
+                _preferences = JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? new();
+            }
+            else
+            {
+                _preferences = new Dictionary<string, string>();
+            }
+        }
+        catch
+        {
+            _preferences = new Dictionary<string, string>();
+        }
+
+        return _preferences;
+    }
+
+    private static void SaveAllPreferences()
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(PreferencesFilePath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            var json = JsonSerializer.Serialize(_preferences, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(PreferencesFilePath, json);
+        }
+        catch
+        {
+            // Ignore save errors
+        }
+    }
 
     public static bool EnableCursorSprites
     {
@@ -25,12 +84,10 @@ public static partial class Preferences
 
     public static void SavePreference(string key, string value)
     {
-        var regkey = Registry.CurrentUser.OpenSubKey("Software", true);
-
-        regkey = regkey.CreateSubKey("IntersectEditor");
-        regkey = regkey.CreateSubKey($"{ClientConfiguration.Instance.Host}:{ClientConfiguration.Instance.Port}");
-
-        regkey.SetValue(key, value);
+        var prefs = LoadPreferences();
+        var storeKey = $"{ClientConfiguration.Instance.Host}:{ClientConfiguration.Instance.Port}:{key}";
+        prefs[storeKey] = value;
+        SaveAllPreferences();
     }
 
     private static bool? LoadPreferenceBool(string key)
@@ -46,26 +103,15 @@ public static partial class Preferences
 
     public static string LoadPreference(string key)
     {
-        var regkey = Registry.CurrentUser.OpenSubKey("Software", false);
-        regkey = regkey.OpenSubKey("IntersectEditor", false);
-        if (regkey == null)
+        try
+        {
+            var prefs = LoadPreferences();
+            var storeKey = $"{ClientConfiguration.Instance.Host}:{ClientConfiguration.Instance.Port}:{key}";
+            return prefs.TryGetValue(storeKey, out var value) ? value : string.Empty;
+        }
+        catch
         {
             return string.Empty;
         }
-
-        regkey = regkey.OpenSubKey($"{ClientConfiguration.Instance.Host}:{ClientConfiguration.Instance.Port}");
-        if (regkey == null)
-        {
-            return string.Empty;
-        }
-
-        var value = (string) regkey.GetValue(key);
-        if (string.IsNullOrEmpty(value))
-        {
-            return string.Empty;
-        }
-
-        return value;
     }
-
 }

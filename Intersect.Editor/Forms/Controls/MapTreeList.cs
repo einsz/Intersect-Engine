@@ -1,17 +1,15 @@
-using System.Runtime.InteropServices;
+using Eto.Forms;
+using Eto.Drawing;
 using Intersect.Editor.Networking;
 using Intersect.Framework.Core.GameObjects.Maps.MapList;
 using Microsoft.Extensions.Logging;
 
-
 namespace Intersect.Editor.Forms.Controls;
 
-
-public partial class MapTreeList : UserControl
+public partial class MapTreeList : Panel
 {
-    private readonly Dictionary<MapListItem, TreeNode> _nodeLookup = new();
+    private readonly Dictionary<MapListItem, TreeGridItem> _nodeLookup = new();
 
-    //Cross Thread Delegates
     public delegate void TryUpdateMapList(Guid selectMap, List<Guid> restrictMaps = null);
 
     public bool Chronological = false;
@@ -24,263 +22,128 @@ public partial class MapTreeList : UserControl
 
     private List<Guid>? mRestrictMapIds;
 
-    private System.Drawing.Point mScrollPoint;
+    private Guid mSelectedMap = Guid.Empty;
 
-    private Guid mSelectedMap = Guid.Empty; //id or map or folder that is selected
+    private int mSelectionType = -1;
 
-    private int mSelectionType = -1; //0 for none, 1 for map, 2 for folder
+    protected TreeGridView list;
+    protected ContextMenu mContextMenu;
+    protected ButtonMenuItem mDropDownLinkItem;
+    protected ButtonMenuItem mDropDownUnlinkItem;
+    protected ButtonMenuItem mRecacheMapItem;
 
     public MapTreeList()
     {
-        InitializeComponent();
+        list = new TreeGridView
+        {
+            ShowHeader = false,
+            AllowMultipleSelection = false,
+            AllowDrop = false
+        };
 
-        //Init Delegates
+        var nameColumn = new GridColumn
+        {
+            HeaderText = "Name",
+            DataCell = new TextBoxCell(0),
+            AutoSize = true,
+            Editable = false,
+            Expand = true
+        };
+
+        list.Columns.Add(nameColumn);
+        list.DataStore = new TreeGridItemCollection();
+
+        mDropDownLinkItem = new ButtonMenuItem { Text = "Link Map" };
+        mDropDownUnlinkItem = new ButtonMenuItem { Text = "Unlink Map" };
+        mRecacheMapItem = new ButtonMenuItem { Text = "Recache Map" };
+
+        mContextMenu = new ContextMenu(mDropDownLinkItem, mDropDownUnlinkItem, mRecacheMapItem);
+
+        list.SelectionChanged += treeMapList_AfterSelect;
+        list.CellDoubleClick += treeMapList_CellDoubleClick;
+        list.MouseDown += treeMapList_MouseDown;
+        list.AfterExpand += list_AfterExpand;
+        list.AfterCollapse += list_AfterCollapse;
+
         MapListDelegate = UpdateMapList;
-    }
 
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    internal static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
-
-    private void treeMapList_ItemDrag(object sender, ItemDragEventArgs e)
-    {
-        if (!mCanEdit)
+        Content = new StackLayout
         {
-            return;
-        }
-
-        DoDragDrop(e.Item, DragDropEffects.Move);
-    }
-
-    private void treeMapList_DragEnter(object sender, DragEventArgs e)
-    {
-        if (!mCanEdit)
-        {
-            return;
-        }
-
-        e.Effect = DragDropEffects.Move;
-    }
-
-    private void treeMapList_DragDrop(object sender, DragEventArgs e)
-    {
-        if (!mCanEdit)
-        {
-            return;
-        }
-
-        // Retrieve the client coordinates of the drop location.
-        var targetPoint = list.PointToClient(new System.Drawing.Point(e.X, e.Y));
-
-        // Retrieve the node at the drop location.
-        var targetNode = list.GetNodeAt(targetPoint);
-
-        // Retrieve the node that was dragged.
-        var draggedNode = (TreeNode)e.Data.GetData(typeof(TreeNode));
-        int srcType;
-        Guid srcId;
-        switch (draggedNode.Tag)
-        {
-            case MapListMap draggedMap:
-                srcType = 1;
-                srcId = draggedMap.MapId;
-                break;
-
-            case MapListFolder draggedFolder:
-                srcType = 0;
-                srcId = draggedFolder.FolderId;
-                break;
-
-            default:
-                throw new InvalidOperationException($"Unknown type {draggedNode.Tag?.GetType()} is not supported.");
-        }
-
-        var parent = targetNode;
-        while (parent != null)
-        {
-            if (parent == draggedNode)
-            {
-                return;
-            }
-
-            parent = parent.Parent;
-        }
-
-        // Confirm that the node at the drop location is not
-        // the dragged node and that target node isn't null
-        // (for example if you drag outside the control)
-        if (!draggedNode.Equals(targetNode) && targetNode != null)
-        {
-            switch (targetNode.Tag)
-            {
-                case MapListMap targetMap:
-                    PacketSender.SendMapListMove(srcType, srcId, 1, targetMap.MapId);
-
-                    // Remove the node from its current
-                    // location and add it to the node at the drop location.
-                    draggedNode.Remove();
-
-                    if (targetNode.Parent == null)
-                    {
-                        list.Nodes.Insert(targetNode.Index, draggedNode);
-                    }
-                    else
-                    {
-                        targetNode.Parent.Nodes.Insert(targetNode.Index, draggedNode);
-                    }
-
-                    // Expand the node at the location
-                    // to show the dropped node.
-                    targetNode.Expand();
-                    break;
-
-                case MapListFolder targetFolder:
-                    PacketSender.SendMapListMove(srcType, srcId, 0, targetFolder.FolderId);
-
-                    // Remove the node from its current
-                    // location and add it to the node at the drop location.
-                    draggedNode.Remove();
-                    targetNode.Nodes.Add(draggedNode);
-
-                    // Expand the node at the location
-                    // to show the dropped node.
-                    targetNode.Expand();
-                    break;
-            }
-        }
-        else if (list.ClientRectangle.Contains(targetPoint))
-        {
-            var destType = -1;
-            var destId = Guid.Empty;
-            PacketSender.SendMapListMove(srcType, srcId, destType, destId);
-
-            // Remove the node from its current
-            // location and add it to the node at the drop location.
-            draggedNode.Remove();
-            list.Nodes.Add(draggedNode);
-        }
-    }
-
-    private void treeMapList_AfterLabelEdit(object sender, NodeLabelEditEventArgs e)
-    {
-        if (!mCanEdit)
-        {
-            return;
-        }
-
-        if (e.Node != null)
-        {
-            if (string.IsNullOrEmpty(e.Label))
-            {
-                e.Node.Text = e.Node.Tag is MapListMap mapListMap ? mapListMap.Name : e.Label;
-            }
-            else
-            {
-                switch (e.Node.Tag)
-                {
-                    case MapListMap mapListMap:
-                        mapListMap.Name = e.Label;
-
-                        //Send Rename Map
-                        PacketSender.SendRename(mapListMap, e.Label);
-                        e.Node.Text = mapListMap.Name;
-                        break;
-
-                    case MapListFolder mapListFolder:
-                        mapListFolder.Name = e.Label;
-
-                        //Send Rename Folder
-                        PacketSender.SendRename(mapListFolder, e.Label);
-                        e.Node.Text = e.Label;
-                        break;
-                }
-            }
-        }
-
-        e.CancelEdit = true;
-    }
-
-    private void treeMapList_BeforeLabelEdit(object sender, NodeLabelEditEventArgs e)
-    {
-        if (!mCanEdit)
-        {
-            return;
-        }
-
-        if (e.Node != null)
-        {
-            if (e.Node.Tag is MapListMap mapListMap)
-            {
-                if (e.Node.Text == mapListMap.Name && Chronological)
-                {
-                    e.Node.Text = mapListMap.Name;
-                }
-            }
-        }
-    }
-
-    private void treeMapList_AfterSelect(object sender, TreeViewEventArgs e)
-    {
-        switch (e.Node.Tag)
-        {
-            case MapListMap mapListMap:
-                mSelectionType = 0;
-                mSelectedMap = mapListMap.MapId;
-                break;
-
-            case MapListFolder mapListFolder:
-                mSelectionType = 1;
-                mSelectedMap = mapListFolder.FolderId;
-                break;
-
-            default:
-                mSelectionType = -1;
-                mSelectedMap = Guid.Empty;
-                break;
-        }
-    }
-
-    private void treeMapList_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
-    {
+            Padding = new Padding(5),
+            Items = { new StackLayoutItem(list, expand: true) }
+        };
     }
 
     private void treeMapList_MouseDown(object sender, MouseEventArgs e)
     {
-        if (e.Button == MouseButtons.Right)
+        if (e.Buttons == MouseButtons.Alternate)
         {
-            list.SelectedNode = list.GetNodeAt(e.Location);
+            var hitTest = list.GetCellAt(e.Location);
+            if (hitTest != null && hitTest.Row >= 0)
+            {
+                var dataStore = list.DataStore as TreeGridItemCollection;
+                if (dataStore != null && hitTest.Row < dataStore.Count)
+                {
+                    list.SelectedItem = dataStore[hitTest.Row];
+                }
+            }
         }
     }
 
-    private void BeginEdit(TreeNode node)
+    private void treeMapList_CellDoubleClick(object sender, GridCellMouseEventArgs e)
     {
-        node.BeginEdit();
+    }
+
+    private void treeMapList_AfterSelect(object sender, EventArgs e)
+    {
+        var selected = list.SelectedItem as TreeGridItem;
+        if (selected?.Tag != null)
+        {
+            switch (selected.Tag)
+            {
+                case MapListMap mapListMap:
+                    mSelectionType = 0;
+                    mSelectedMap = mapListMap.MapId;
+                    break;
+
+                case MapListFolder mapListFolder:
+                    mSelectionType = 1;
+                    mSelectedMap = mapListFolder.FolderId;
+                    break;
+
+                default:
+                    mSelectionType = -1;
+                    mSelectedMap = Guid.Empty;
+                    break;
+            }
+        }
     }
 
     public void UpdateMapList(Guid selectMapId = default, List<Guid>? restrictMaps = null)
     {
         Intersect.Core.ApplicationContext.Context.Value?.Logger.LogInformation("Updating list");
         var selectedMapListMap = selectMapId == default ? default : MapList.List.FindMap(selectMapId);
-        if (selectedMapListMap != default && _nodeLookup.TryGetValue(selectedMapListMap, out var treeNode))
+        if (selectedMapListMap != default && _nodeLookup.TryGetValue(selectedMapListMap, out var treeItem))
         {
-            list.SelectedNode = treeNode;
+            list.SelectedItem = treeItem;
         }
         else
         {
-            list.Nodes.Clear();
+            var collection = new TreeGridItemCollection();
             _nodeLookup.Clear();
             mRestrictMapIds = restrictMaps;
-            AddMapListToTree(MapList.List, null, selectMapId, mRestrictMapIds);
+            AddMapListToTree(MapList.List, collection, selectMapId, mRestrictMapIds);
+            list.DataStore = collection;
         }
     }
 
     private void AddMapListToTree(
         MapList mapList,
-        TreeNode? parent,
+        TreeGridItemCollection parentCollection,
         Guid selectMapId = default,
-        List<Guid>? restrictMaps = null
-    )
+        List<Guid>? restrictMaps = null)
     {
-        TreeNode tmpNode;
+        TreeGridItem tmpItem;
         if (Chronological)
         {
             foreach (var map in MapList.OrderedMaps)
@@ -290,11 +153,10 @@ public partial class MapTreeList : UserControl
                     continue;
                 }
 
-                tmpNode = list.Nodes.Add(map.Name);
-                _nodeLookup[map] = tmpNode;
-                tmpNode.Tag = map;
-                tmpNode.ImageIndex = 1;
-                tmpNode.SelectedImageIndex = 1;
+                tmpItem = new TreeGridItem(map.Name);
+                tmpItem.Tag = map;
+                _nodeLookup[map] = tmpItem;
+                parentCollection.Add(tmpItem);
 
                 var selectedId = selectMapId;
                 if (selectedId == default && mSelectionType == 0)
@@ -304,8 +166,7 @@ public partial class MapTreeList : UserControl
 
                 if (map.MapId == selectMapId)
                 {
-                    list.SelectedNode = tmpNode;
-                    list.Focus();
+                    list.SelectedItem = tmpItem;
                 }
             }
         }
@@ -316,32 +177,31 @@ public partial class MapTreeList : UserControl
                 switch (item)
                 {
                     case MapListFolder folder:
-                        tmpNode = (parent?.Nodes ?? list.Nodes).Add(item.Name);
-                        _nodeLookup[item] = tmpNode;
-                        tmpNode.Tag = item;
-                        AddMapListToTree(folder.Children, tmpNode, selectMapId, restrictMaps);
+                        tmpItem = new TreeGridItem(item.Name);
+                        tmpItem.Tag = item;
+                        _nodeLookup[item] = tmpItem;
+                        parentCollection.Add(tmpItem);
+                        AddMapListToTree(folder.Children, tmpItem.Children, selectMapId, restrictMaps);
 
                         if (mOpenFolders.Contains(folder.FolderId))
                         {
-                            tmpNode.Expand();
+                            tmpItem.Expanded = true;
                         }
 
                         if (mSelectionType == 1 && mSelectedMap == folder.FolderId)
                         {
-                            list.SelectedNode = tmpNode;
-                            list.Focus();
+                            list.SelectedItem = tmpItem;
                         }
 
-                        tmpNode.ImageIndex = 0;
-                        tmpNode.SelectedImageIndex = 0;
                         break;
 
                     case MapListMap map:
                         if (restrictMaps?.Contains(map.MapId) ?? true)
                         {
-                            tmpNode = (parent?.Nodes ?? list.Nodes).Add(item.Name);
-                            _nodeLookup[item] = tmpNode;
-                            tmpNode.Tag = map;
+                            tmpItem = new TreeGridItem(item.Name);
+                            tmpItem.Tag = map;
+                            _nodeLookup[item] = tmpItem;
+                            parentCollection.Add(tmpItem);
 
                             var selectedId = selectMapId;
                             if (selectedId == default && mSelectionType == 0)
@@ -351,12 +211,9 @@ public partial class MapTreeList : UserControl
 
                             if (map.MapId == selectMapId)
                             {
-                                list.SelectedNode = tmpNode;
-                                list.Focus();
+                                list.SelectedItem = tmpItem;
                             }
 
-                            tmpNode.ImageIndex = 1;
-                            tmpNode.SelectedImageIndex = 1;
                             break;
                         }
 
@@ -366,30 +223,29 @@ public partial class MapTreeList : UserControl
         }
     }
 
-    public void EnableEditing(ContextMenuStrip menuStrip)
+    public void EnableEditing(ContextMenu menu)
     {
-        if (menuStrip != null)
+        if (menu != null)
         {
-            list.ContextMenuStrip = menuStrip;
+            list.ContextMenu = menu;
         }
 
-        list.LabelEdit = true;
         mCanEdit = true;
     }
 
-    public void SetDoubleClick(TreeNodeMouseClickEventHandler handler)
+    public void SetDoubleClick(EventHandler<GridCellMouseEventArgs> handler)
     {
-        list.NodeMouseDoubleClick += handler;
+        list.CellDoubleClick += handler;
     }
 
-    public void SetSelect(TreeViewEventHandler handler)
+    public void SetSelect(EventHandler handler)
     {
-        list.AfterSelect += handler;
+        list.SelectionChanged += handler;
     }
 
-    private void list_AfterExpand(object sender, TreeViewEventArgs e)
+    private void list_AfterExpand(object sender, TreeGridViewItemEventArgs e)
     {
-        if (e.Node.Tag is MapListFolder folder)
+        if (e.Item?.Tag is MapListFolder folder)
         {
             if (!mOpenFolders.Contains(folder.FolderId))
             {
@@ -398,33 +254,11 @@ public partial class MapTreeList : UserControl
         }
     }
 
-    private void list_AfterCollapse(object sender, TreeViewEventArgs e)
+    private void list_AfterCollapse(object sender, TreeGridViewItemEventArgs e)
     {
-        if (e.Node.Tag is MapListFolder folder)
+        if (e.Item?.Tag is MapListFolder folder)
         {
             mOpenFolders.Remove(folder.FolderId);
         }
     }
-
-    public static void Scroll(Control control)
-    {
-        var pt = control.PointToClient(Cursor.Position);
-
-        if (pt.Y + 20 > control.Height)
-        {
-            // scroll down
-            SendMessage(control.Handle, 277, (IntPtr)1, (IntPtr)0);
-        }
-        else if (pt.Y < 20)
-        {
-            // scroll up
-            SendMessage(control.Handle, 277, (IntPtr)0, (IntPtr)0);
-        }
-    }
-
-    private void list_DragOver(object sender, DragEventArgs e)
-    {
-        Scroll(list);
-    }
-
 }

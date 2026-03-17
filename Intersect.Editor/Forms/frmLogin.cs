@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using Eto.Drawing;
+using Eto.Forms;
 using Intersect.Configuration;
 using Intersect.Editor.Content;
 using Intersect.Editor.Core;
@@ -26,19 +28,83 @@ public partial class FrmLogin : Form
     public BeginEditorLoop EditorLoopDelegate;
 
     private readonly bool _authenticating;
-    
+
     private bool _optionsLoaded;
     private string _savedPassword = string.Empty;
     private bool _loginPending;
     private TokenResultType? _tokenResultType;
     private TokenResponse? _tokenResponse;
 
+    // Controls
+    private TextBox txtUsername;
+    private PasswordBox txtPassword;
+    private CheckBox chkRemember;
+    private Button btnLogin;
+    private Label lblStatus;
+    private Label lblVersion;
+    private Label lblGettingStarted;
+    private Label lblUsername;
+    private Label lblPassword;
+    private UITimer tmrSocket;
+
     public FrmLogin(bool authenticating)
     {
         _authenticating = authenticating;
         CultureInfo.DefaultThreadCurrentCulture = new CultureInfo("en-US");
         InitializeComponent();
-        Icon = Program.Icon;
+    }
+
+    private void InitializeComponent()
+    {
+        Title = "Login";
+        MinimumSize = new Size(400, 480);
+        Size = new Size(400, 480);
+        Resizable = false;
+
+        txtUsername = new TextBox();
+        txtPassword = new PasswordBox();
+        chkRemember = new CheckBox { Text = "" };
+        btnLogin = new Button { Text = "Login" };
+        lblStatus = new Label { Text = "" };
+        lblVersion = new Label { Text = "" };
+        lblGettingStarted = new Label { Text = "Getting Started" };
+        lblUsername = new Label { Text = "Username" };
+        lblPassword = new Label { Text = "Password" };
+        tmrSocket = new UITimer { Interval = 0.05 };
+
+        var layout = new DynamicLayout();
+        layout.Padding = new Padding(20);
+        layout.DefaultSpacing = new Size(5, 5);
+
+        layout.Add(lblVersion);
+        layout.Add(lblGettingStarted);
+        layout.AddSpace();
+
+        layout.Add(lblUsername);
+        layout.Add(txtUsername);
+
+        layout.Add(lblPassword);
+        layout.Add(txtPassword);
+
+        layout.Add(chkRemember);
+        layout.AddSpace();
+
+        layout.Add(btnLogin);
+        layout.AddSpace();
+
+        layout.Add(lblStatus);
+
+        Content = layout;
+
+        // Event handlers
+        Load += frmLogin_Load;
+        tmrSocket.Elapsed += tmrSocket_Tick;
+        btnLogin.Click += btnLogin_Click;
+        txtPassword.KeyDown += txtPassword_KeyDown;
+        txtUsername.KeyDown += txtUsername_KeyDown;
+        KeyDown += FrmLogin_KeyDown;
+
+        Closed += OnFormClosed;
     }
 
     private void frmLogin_Load(object sender, EventArgs e)
@@ -69,23 +135,21 @@ public partial class FrmLogin : Form
         {
             return;
         }
-        
+
         GameContentManager.CheckForResources();
         Database.LoadOptions();
         _optionsLoaded = true;
         EditorLoopDelegate = Main.StartLoop;
-        
+
         Database.InitMapCache();
+
+        tmrSocket.Start();
     }
 
     private void InitLocalization()
     {
-        Text = Strings.Login.title;
-        lblVersion.Text = Strings.Login.version.ToString(Application.ProductVersion);
-        lblVersion.Location = new System.Drawing.Point(
-            (lblVersion.Parent?.ClientRectangle.Right - (lblVersion.Parent?.Padding.Right + lblVersion.Width + 4)) ?? 0,
-            (lblVersion.Parent?.ClientRectangle.Bottom - (lblVersion.Parent?.Padding.Bottom + lblVersion.Height + 4)) ?? 0
-        );
+        Title = Strings.Login.title;
+        lblVersion.Text = Strings.Login.version.ToString("1.0.0");
         lblGettingStarted.Text = Strings.Login.gettingstarted;
         lblUsername.Text = Strings.Login.username;
         lblPassword.Text = Strings.Login.password;
@@ -110,14 +174,14 @@ public partial class FrmLogin : Form
         {
             if (_tokenResultType == TokenResultType.TokenReceived && _tokenResponse != default)
             {
-                tmrSocket.Enabled = false;
-                Hide();
+                tmrSocket.Stop();
+                Visible = false;
                 Globals.UpdateForm.ShowWithToken(_tokenResponse);
             }
 
             return;
         }
-        
+
         if (!_optionsLoaded)
         {
             return;
@@ -200,7 +264,15 @@ public partial class FrmLogin : Form
             return;
         }
 
-        Globals.MainForm ??= new FrmMain();
+        // Create the main editor form if not already created
+        Console.WriteLine($"frmLogin: About to check MainForm (current: {(Globals.MainForm == null ? "null" : "exists")})");
+        if (Globals.MainForm == null)
+        {
+            Console.WriteLine("frmLogin: Creating new FrmMain");
+            Globals.MainForm = new FrmMain();
+            Console.WriteLine("frmLogin: FrmMain created");
+        }
+
         if (!Networking.Network.Connected)
         {
             Networking.Network.Connect();
@@ -210,36 +282,37 @@ public partial class FrmLogin : Form
         btnLogin.Enabled = false;
     }
 
-    protected override void OnKeyPress(KeyPressEventArgs e)
+    protected override void OnKeyDown(KeyEventArgs e)
     {
-        base.OnKeyPress(e);
-        if (e.KeyChar != 13)
+        base.OnKeyDown(e);
+        if (e.Key == Keys.Enter)
         {
-            return;
+            e.Handled = true;
+            btnLogin_Click(null, null);
         }
-
-        e.Handled = true;
-        btnLogin_Click(null, null);
     }
 
-    protected override void OnClosed(EventArgs e)
+    private void OnFormClosed(object sender, EventArgs e)
     {
         if (_authenticating)
         {
-            base.OnClosed(e);
             return;
         }
 
         Networking.Network.EditorLidgrenNetwork?.Disconnect(NetworkStatus.Quitting.ToString());
+        Application.Instance.Quit();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
         base.OnClosed(e);
-        Application.Exit();
     }
 
     public void TryRemembering()
     {
         using (var sha = new SHA256Managed())
         {
-            if (chkRemember.Checked)
+            if (chkRemember.Checked == true)
             {
                 Preferences.SavePreference("Username", txtUsername.Text);
                 if (_savedPassword != "")
@@ -265,7 +338,7 @@ public partial class FrmLogin : Form
 
     private void txtPassword_KeyDown(object sender, KeyEventArgs e)
     {
-        if (e.KeyCode == Keys.Return)
+        if (e.Key == Keys.Enter)
         {
             return;
         }
@@ -280,7 +353,7 @@ public partial class FrmLogin : Form
 
     private void txtUsername_KeyDown(object sender, KeyEventArgs e)
     {
-        if (e.KeyCode == Keys.Return)
+        if (e.Key == Keys.Enter)
         {
             return;
         }
@@ -296,9 +369,10 @@ public partial class FrmLogin : Form
 
     private void FrmLogin_KeyDown(object sender, KeyEventArgs e)
     {
-        if (e.KeyCode == Keys.F1)
+        if (e.Key == Keys.F1)
         {
-            new FrmOptions().ShowDialog();
+            var optionsForm = new FrmOptions();
+            optionsForm.Show();
         }
     }
 
@@ -309,28 +383,17 @@ public partial class FrmLogin : Form
 
     public void ShowSafe(bool show = true)
     {
-        var doShow = new Action<Form>(
-            instance =>
+        Application.Instance.Invoke(() =>
+        {
+            if (show)
             {
-                if (show)
-                {
-                    instance?.Show();
-                }
-                else
-                {
-                    instance?.Hide();
-                }
+                Show();
             }
-        );
-
-        if (!InvokeRequired)
-        {
-            doShow(this);
-        }
-        else
-        {
-            Invoke(doShow, this);
-        }
+            else
+            {
+                Visible = false;
+            }
+        });
     }
 
 }

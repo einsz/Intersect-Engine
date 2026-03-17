@@ -1,6 +1,6 @@
-using System.Media;
-using DarkUI.Controls;
-using DarkUI.Forms;
+using Intersect.Editor.Forms.Helpers;
+using Eto.Forms;
+using Eto.Drawing;
 using Intersect.Editor.Content;
 using Intersect.Editor.Core;
 using Intersect.Editor.General;
@@ -11,249 +11,367 @@ using Intersect.Framework.Core.GameObjects.Animations;
 using Intersect.Framework.Core.GameObjects.Lighting;
 using Intersect.GameObjects;
 using Intersect.Utilities;
-using Microsoft.Xna.Framework.Graphics;
 
 namespace Intersect.Editor.Forms.Editors;
 
-
 public partial class FrmAnimation : EditorForm
 {
-    private readonly ToolTip _tooltip = new();
+    private List<AnimationDescriptor> mChanged = new();
+    private string? mCopiedItem;
+    private AnimationDescriptor? mEditorItem;
+    private List<string> mKnownFolders = new();
 
-    private List<AnimationDescriptor> mChanged = new List<AnimationDescriptor>();
-
-    private string mCopiedItem;
-
-    private AnimationDescriptor mEditorItem;
-
-    private List<string> mKnownFolders = new List<string>();
-
-    private RenderTarget2D mLowerDarkness;
-
-    private int mLowerFrame;
-
-    //Mono Rendering Variables
-    private SwapChainRenderTarget mLowerWindow;
-
-    private bool mPlayLower;
-
-    private bool mPlayUpper;
-
-    private SoundPlayer soundPlayer = new();
-
-    private bool loopSoundOnPreview;
-
-    private RenderTarget2D mUpperDarkness;
-
-    private int mUpperFrame;
-
-    private SwapChainRenderTarget mUpperWindow;
+    protected ListBox? lstGameObjects;
+    protected TextBox? txtName;
+    protected TextBox? txtSearch;
+    protected DropDown? cmbFolder;
+    protected DropDown? cmbSound;
+    protected DropDown? cmbLowerGraphic;
+    protected DropDown? cmbUpperGraphic;
+    protected NumericStepper? nudLowerHorizontalFrames;
+    protected NumericStepper? nudLowerVerticalFrames;
+    protected NumericStepper? nudLowerFrameCount;
+    protected NumericStepper? nudLowerFrameDuration;
+    protected NumericStepper? nudLowerLoopCount;
+    protected NumericStepper? nudUpperHorizontalFrames;
+    protected NumericStepper? nudUpperVerticalFrames;
+    protected NumericStepper? nudUpperFrameCount;
+    protected NumericStepper? nudUpperFrameDuration;
+    protected NumericStepper? nudUpperLoopCount;
+    protected Slider? scrlLowerFrame;
+    protected Slider? scrlUpperFrame;
+    protected Slider? scrlDarkness;
+    protected CheckBox? chkCompleteSoundPlayback;
+    protected CheckBox? chkLoopSoundDuringPreview;
+    protected CheckBox? chkDisableLowerRotations;
+    protected CheckBox? chkDisableUpperRotations;
+    protected CheckBox? chkRenderAbovePlayer;
+    protected CheckBox? chkRenderBelowFringe;
+    protected CheckBox? btnAlphabetical;
+    protected Button? btnSave;
+    protected Button? btnCancel;
+    protected Button? btnSwap;
+    protected Button? btnPlayLower;
+    protected Button? btnPlayUpper;
+    protected Button? btnLowerClone;
+    protected Button? btnUpperClone;
+    protected Button? btnAddFolder;
+    protected Button? btnClearSearch;
+    protected GroupBox? grpAnimations;
+    protected GroupBox? grpGeneral;
+    protected GroupBox? grpLower;
+    protected GroupBox? grpUpper;
+    protected GroupBox? grpLowerPlayback;
+    protected GroupBox? grpUpperPlayback;
+    protected GroupBox? grpLowerFrameOpts;
+    protected GroupBox? grpUpperFrameOpts;
+    protected GroupBox? grpLowerExtraOptions;
+    protected GroupBox? grpUpperExtraOptions;
+    protected Panel? pnlContainer;
+    protected Label? lblName;
+    protected Label? lblSound;
+    protected Label? lblLowerGraphic;
+    protected Label? lblLowerHorizontalFrames;
+    protected Label? lblLowerVerticalFrames;
+    protected Label? lblLowerFrameCount;
+    protected Label? lblLowerFrameDuration;
+    protected Label? lblLowerLoopCount;
+    protected Label? lblLowerFrame;
+    protected Label? lblUpperGraphic;
+    protected Label? lblUpperHorizontalFrames;
+    protected Label? lblUpperVerticalFrames;
+    protected Label? lblUpperFrameCount;
+    protected Label? lblUpperFrameDuration;
+    protected Label? lblUpperLoopCount;
+    protected Label? lblUpperFrame;
+    protected Label? labelDarkness;
+    protected Label? lblFolder;
 
     public FrmAnimation()
     {
-        ApplyHooks();
-        InitializeComponent();
-        Icon = Program.Icon;
-
-        lstGameObjects.Init(UpdateToolStripItems, AssignEditorItem, toolStripItemNew_Click, toolStripItemCopy_Click, toolStripItemUndo_Click, toolStripItemPaste_Click, toolStripItemDelete_Click);
+        try
+        {
+            Console.WriteLine("  FrmAnimation: ApplyHooks...");
+            ApplyHooks();
+            Console.WriteLine("  FrmAnimation: BuildUI...");
+            BuildUI();
+            Console.WriteLine("  FrmAnimation: InitializeForm...");
+            InitializeForm();
+            Console.WriteLine("  FrmAnimation: Done");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  FrmAnimation constructor error: {ex.Message}\n{ex.StackTrace}");
+            throw;
+        }
     }
 
-    private void AssignEditorItem(Guid id)
+    private void BuildUI()
     {
-        mEditorItem = AnimationDescriptor.Get(id);
-        UpdateEditor();
+        Title = Strings.AnimationEditor.title;
+        MinimumSize = new Size(1024, 768);
+
+        var mainSplitter = new Splitter
+        {
+            Orientation = Orientation.Horizontal,
+            Position = 250,
+            Panel1 = BuildLeftPanel(),
+            Panel2 = BuildRightPanel()
+        };
+
+        Content = mainSplitter;
+    }
+
+    private Panel BuildLeftPanel()
+    {
+        lstGameObjects = new ListBox();
+        txtSearch = new TextBox { PlaceholderText = Strings.AnimationEditor.searchplaceholder };
+        btnAlphabetical = new CheckBox { Text = "A-Z" };
+        cmbFolder = new DropDown();
+        btnAddFolder = new Button { Text = "+" };
+        btnClearSearch = new Button { Text = "X" };
+        lblFolder = new Label { Text = Strings.AnimationEditor.folderlabel };
+
+        var searchPanel = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Items = { txtSearch, btnClearSearch, btnAlphabetical }
+        };
+
+        var folderPanel = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Items = { lblFolder, cmbFolder, btnAddFolder }
+        };
+
+        return new Panel
+        {
+            Content = new StackLayout
+            {
+                Padding = new Padding(5),
+                Spacing = 5,
+                Items = { searchPanel, folderPanel, lstGameObjects }
+            }
+        };
+    }
+
+    private Panel BuildRightPanel()
+    {
+        pnlContainer = new Panel();
+        BuildEditorControls();
+
+        var topButtons = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 5,
+            Items =
+            {
+                new Button { Text = Strings.AnimationEditor.New },
+                new Button { Text = Strings.AnimationEditor.delete },
+                new Button { Text = Strings.AnimationEditor.copy },
+                new Button { Text = Strings.AnimationEditor.paste },
+                new Button { Text = Strings.AnimationEditor.undo }
+            }
+        };
+
+        btnSave = new Button { Text = Strings.AnimationEditor.save };
+        btnCancel = new Button { Text = Strings.AnimationEditor.cancel };
+        _btnSave = btnSave;
+        _btnCancel = btnCancel;
+
+        var bottomButtons = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 5,
+            Items = { btnSave, btnCancel }
+        };
+
+        return new Panel
+        {
+            Content = new StackLayout
+            {
+                Padding = new Padding(5),
+                Spacing = 5,
+                Items = { topButtons, pnlContainer, bottomButtons }
+            }
+        };
+    }
+
+    private void BuildEditorControls()
+    {
+        txtName = new TextBox();
+        cmbSound = new DropDown();
+        cmbLowerGraphic = new DropDown();
+        cmbUpperGraphic = new DropDown();
+
+        nudLowerHorizontalFrames = new NumericStepper { MinValue = 1 };
+        nudLowerVerticalFrames = new NumericStepper { MinValue = 1 };
+        nudLowerFrameCount = new NumericStepper { MinValue = 1 };
+        nudLowerFrameDuration = new NumericStepper { MinValue = 1 };
+        nudLowerLoopCount = new NumericStepper { MinValue = 0 };
+        nudUpperHorizontalFrames = new NumericStepper { MinValue = 1 };
+        nudUpperVerticalFrames = new NumericStepper { MinValue = 1 };
+        nudUpperFrameCount = new NumericStepper { MinValue = 1 };
+        nudUpperFrameDuration = new NumericStepper { MinValue = 1 };
+        nudUpperLoopCount = new NumericStepper { MinValue = 0 };
+
+        scrlLowerFrame = new Slider { MinValue = 1 };
+        scrlUpperFrame = new Slider { MinValue = 1 };
+        scrlDarkness = new Slider { MinValue = 0, MaxValue = 100 };
+
+        chkCompleteSoundPlayback = new CheckBox { Text = Strings.AnimationEditor.soundcomplete };
+        chkLoopSoundDuringPreview = new CheckBox { Text = Strings.AnimationEditor.LoopSoundDuringPreview };
+        chkDisableLowerRotations = new CheckBox { Text = Strings.AnimationEditor.DisableRotations };
+        chkDisableUpperRotations = new CheckBox { Text = Strings.AnimationEditor.DisableRotations };
+        chkRenderAbovePlayer = new CheckBox { Text = Strings.AnimationEditor.renderaboveplayer };
+        chkRenderBelowFringe = new CheckBox { Text = Strings.AnimationEditor.renderbelowfringe };
+
+        btnSwap = new Button { Text = Strings.AnimationEditor.swap };
+        btnPlayLower = new Button { Text = Strings.AnimationEditor.Play };
+        btnPlayUpper = new Button { Text = Strings.AnimationEditor.Play };
+        btnLowerClone = new Button { Text = Strings.AnimationEditor.CloneFromPrevious };
+        btnUpperClone = new Button { Text = Strings.AnimationEditor.CloneFromPrevious };
+
+        grpAnimations = new GroupBox { Text = Strings.AnimationEditor.animations };
+        grpGeneral = new GroupBox { Text = Strings.AnimationEditor.general };
+        grpLower = new GroupBox { Text = Strings.AnimationEditor.lowergroup };
+        grpUpper = new GroupBox { Text = Strings.AnimationEditor.uppergroup };
+        grpLowerPlayback = new GroupBox { Text = Strings.AnimationEditor.Playback };
+        grpUpperPlayback = new GroupBox { Text = Strings.AnimationEditor.Playback };
+        grpLowerFrameOpts = new GroupBox { Text = Strings.AnimationEditor.FrameOptions };
+        grpUpperFrameOpts = new GroupBox { Text = Strings.AnimationEditor.FrameOptions };
+        grpLowerExtraOptions = new GroupBox { Text = Strings.AnimationEditor.extraoptions };
+        grpUpperExtraOptions = new GroupBox { Text = Strings.AnimationEditor.extraoptions };
+
+        pnlContainer = new Panel();
+
+        SetupEventHandlers();
+    }
+
+    private void SetupEventHandlers()
+    {
+        txtName!.TextChanged += (s, e) =>
+        {
+            if (mEditorItem != null)
+            {
+                mEditorItem.Name = txtName.Text;
+            }
+        };
+
+        if (btnSave != null) btnSave.Click += (s, e) =>
+        {
+            if (mChanged != null)
+            {
+                foreach (var item in mChanged)
+                {
+                    PacketSender.SendSaveObject(item);
+                    item.DeleteBackup();
+                }
+            }
+            Close();
+            Globals.CurrentEditor = -1;
+        };
+
+        if (btnCancel != null) btnCancel.Click += (s, e) =>
+        {
+            if (mChanged != null)
+            {
+                foreach (var item in mChanged)
+                {
+                    item.RestoreBackup();
+                    item.DeleteBackup();
+                }
+            }
+            Close();
+            Globals.CurrentEditor = -1;
+        };
+    }
+
+    private void InitializeForm()
+    {
+        cmbSound?.Items.Clear();
+        cmbSound?.Items.Add(Strings.General.None);
+        if (GameContentManager.SmartSortedSoundNames != null)
+        {
+            foreach (var name in GameContentManager.SmartSortedSoundNames)
+            {
+                cmbSound?.Items.Add(name);
+            }
+        }
+
+        var animTextures = GameContentManager.GetSmartSortedTextureNames(GameContentManager.TextureType.Animation);
+
+        cmbLowerGraphic?.Items.Clear();
+        cmbLowerGraphic?.Items.Add(Strings.General.None);
+        if (animTextures != null)
+        {
+            foreach (var name in animTextures)
+            {
+                cmbLowerGraphic?.Items.Add(name);
+            }
+        }
+
+        cmbUpperGraphic?.Items.Clear();
+        cmbUpperGraphic?.Items.Add(Strings.General.None);
+        if (animTextures != null)
+        {
+            foreach (var name in animTextures)
+            {
+                cmbUpperGraphic?.Items.Add(name);
+            }
+        }
+
+        InitEditor();
     }
 
     protected override void GameObjectUpdatedDelegate(GameObjectType type)
     {
-        if (type != GameObjectType.Animation)
+        if (type == GameObjectType.Animation)
         {
-            return;
+            InitEditor();
+            if (mEditorItem != null && !AnimationDescriptor.Lookup.Values.Contains(mEditorItem))
+            {
+                mEditorItem = null;
+                UpdateEditor();
+            }
         }
-
-        InitEditor();
-        if (mEditorItem == null || AnimationDescriptor.Lookup.Values.Contains(mEditorItem))
-        {
-            return;
-        }
-
-        mEditorItem = null;
-        UpdateEditor();
-    }
-
-    private void btnCancel_Click(object sender, EventArgs e)
-    {
-        foreach (var item in mChanged)
-        {
-            item.RestoreBackup();
-            item.DeleteBackup();
-        }
-
-        Hide();
-        Globals.CurrentEditor = -1;
-        Dispose();
-    }
-
-    private void btnSave_Click(object sender, EventArgs e)
-    {
-        //Send Changed items
-        foreach (var item in mChanged)
-        {
-            PacketSender.SendSaveObject(item);
-            item.DeleteBackup();
-        }
-
-        Hide();
-        Globals.CurrentEditor = -1;
-        Dispose();
-    }
-
-    private void frmAnimation_Load(object sender, EventArgs e)
-    {
-        //Animation Sound
-        cmbSound.Items.Clear();
-        cmbSound.Items.Add(Strings.General.None);
-        cmbSound.Items.AddRange(GameContentManager.SmartSortedSoundNames);
-
-        //Lower Animation Graphic
-        cmbLowerGraphic.Items.Clear();
-        cmbLowerGraphic.Items.Add(Strings.General.None);
-        cmbLowerGraphic.Items.AddRange(
-            GameContentManager.GetSmartSortedTextureNames(GameContentManager.TextureType.Animation)
-        );
-
-        //Upper Animation Graphic
-        cmbUpperGraphic.Items.Clear();
-        cmbUpperGraphic.Items.Add(Strings.General.None);
-        cmbUpperGraphic.Items.AddRange(
-            GameContentManager.GetSmartSortedTextureNames(GameContentManager.TextureType.Animation)
-        );
-
-        mLowerWindow = new SwapChainRenderTarget(
-            Core.Graphics.GetGraphicsDevice(), picLowerAnimation.Handle, picLowerAnimation.Width,
-            picLowerAnimation.Height
-        );
-
-        mUpperWindow = new SwapChainRenderTarget(
-            Core.Graphics.GetGraphicsDevice(), picUpperAnimation.Handle, picUpperAnimation.Width,
-            picUpperAnimation.Height
-        );
-
-        mLowerDarkness = Core.Graphics.CreateRenderTexture(picLowerAnimation.Width, picLowerAnimation.Height);
-        mUpperDarkness = Core.Graphics.CreateRenderTexture(picUpperAnimation.Width, picUpperAnimation.Height);
-
-        InitLocalization();
-        UpdateEditor();
-    }
-
-    private void InitLocalization()
-    {
-        Text = Strings.AnimationEditor.title;
-        toolStripItemNew.Text = Strings.AnimationEditor.New;
-        toolStripItemDelete.Text = Strings.AnimationEditor.delete;
-        toolStripItemCopy.Text = Strings.AnimationEditor.copy;
-        toolStripItemPaste.Text = Strings.AnimationEditor.paste;
-        toolStripItemUndo.Text = Strings.AnimationEditor.undo;
-
-        grpAnimations.Text = Strings.AnimationEditor.animations;
-
-        grpGeneral.Text = Strings.AnimationEditor.general;
-        lblName.Text = Strings.AnimationEditor.name;
-        lblSound.Text = Strings.AnimationEditor.sound;
-        chkCompleteSoundPlayback.Text = Strings.AnimationEditor.soundcomplete;
-        chkLoopSoundDuringPreview.Text = Strings.AnimationEditor.LoopSoundDuringPreview;
-        labelDarkness.Text = Strings.AnimationEditor.simulatedarkness.ToString(scrlDarkness.Value);
-        btnSwap.Text = Strings.AnimationEditor.swap;
-
-        grpLower.Text = Strings.AnimationEditor.lowergroup;
-        lblLowerGraphic.Text = Strings.AnimationEditor.Graphic;
-        lblLowerHorizontalFrames.Text = Strings.AnimationEditor.HorizontalFrames;
-        lblLowerVerticalFrames.Text = Strings.AnimationEditor.VerticalFrames;
-        lblLowerFrameCount.Text = Strings.AnimationEditor.FrameCount;
-        lblLowerFrameDuration.Text = Strings.AnimationEditor.FrameDuration;
-        lblLowerLoopCount.Text = Strings.AnimationEditor.LoopCount;
-        grpLowerPlayback.Text = Strings.AnimationEditor.Playback;
-        lblLowerFrame.Text = Strings.AnimationEditor.FrameX.ToString(scrlLowerFrame.Value);
-        btnPlayLower.ImageKey = "sharp_play_arrow_white_48dp.png";
-        _tooltip.SetToolTip(btnPlayLower, Strings.AnimationEditor.Play);
-        grpLowerFrameOpts.Text = Strings.AnimationEditor.FrameOptions;
-        btnLowerClone.Text = Strings.AnimationEditor.CloneFromPrevious;
-        chkDisableLowerRotations.Text = Strings.AnimationEditor.DisableRotations;
-        chkRenderAbovePlayer.Text = Strings.AnimationEditor.renderaboveplayer;
-        grpLowerExtraOptions.Text = Strings.AnimationEditor.extraoptions;
-
-        grpUpper.Text = Strings.AnimationEditor.uppergroup;
-        lblUpperGraphic.Text = Strings.AnimationEditor.Graphic;
-        lblUpperHorizontalFrames.Text = Strings.AnimationEditor.HorizontalFrames;
-        lblUpperVerticalFrames.Text = Strings.AnimationEditor.VerticalFrames;
-        lblUpperFrameCount.Text = Strings.AnimationEditor.FrameCount;
-        lblUpperFrameDuration.Text = Strings.AnimationEditor.FrameDuration;
-        lblUpperLoopCount.Text = Strings.AnimationEditor.LoopCount;
-        grpUpperPlayback.Text = Strings.AnimationEditor.Playback;
-        lblUpperFrame.Text = Strings.AnimationEditor.FrameX.ToString(scrlUpperFrame.Value);
-        btnPlayUpper.ImageKey = "sharp_play_arrow_white_48dp.png";
-        _tooltip.SetToolTip(btnPlayUpper, Strings.AnimationEditor.Play);
-        grpUpperFrameOpts.Text = Strings.AnimationEditor.FrameOptions;
-        btnUpperClone.Text = Strings.AnimationEditor.CloneFromPrevious;
-        chkDisableUpperRotations.Text = Strings.AnimationEditor.DisableRotations;
-        chkRenderBelowFringe.Text = Strings.AnimationEditor.renderbelowfringe;
-        grpUpperExtraOptions.Text = Strings.AnimationEditor.extraoptions;
-
-        //Searching/Sorting
-        btnAlphabetical.ToolTipText = Strings.AnimationEditor.sortalphabetically;
-        txtSearch.Text = Strings.AnimationEditor.searchplaceholder;
-        lblFolder.Text = Strings.AnimationEditor.folderlabel;
-
-        btnSave.Text = Strings.AnimationEditor.save;
-        btnCancel.Text = Strings.AnimationEditor.cancel;
     }
 
     private void UpdateEditor()
     {
         if (mEditorItem != null)
         {
-            pnlContainer.Show();
+            pnlContainer!.Visible = true;
 
-            cmbFolder.Text = mEditorItem.Folder;
+            txtName!.Text = mEditorItem.Name;
+            // cmbFolder!.Text = mEditorItem.Folder; // DropDown doesn't have Text setter in Eto
+            cmbSound!.SelectedIndex = cmbSound.Items.IndexOf(
+                new ListItem { Text = TextUtils.NullToNone(mEditorItem.Sound) }
+            );
+            chkCompleteSoundPlayback!.Checked = mEditorItem.CompleteSound;
 
-            txtName.Text = mEditorItem.Name;
-            cmbSound.SelectedIndex = cmbSound.FindString(TextUtils.NullToNone(mEditorItem.Sound));
-            chkCompleteSoundPlayback.Checked = mEditorItem.CompleteSound;
+            cmbLowerGraphic!.SelectedIndex = cmbLowerGraphic.Items.IndexOf(
+                new ListItem { Text = TextUtils.NullToNone(mEditorItem.Lower.Sprite) }
+            );
+            nudLowerHorizontalFrames!.Value = mEditorItem.Lower.XFrames;
+            nudLowerVerticalFrames!.Value = mEditorItem.Lower.YFrames;
+            nudLowerFrameCount!.Value = mEditorItem.Lower.FrameCount;
+            nudLowerFrameDuration!.Value = mEditorItem.Lower.FrameSpeed;
+            nudLowerLoopCount!.Value = mEditorItem.Lower.LoopCount;
 
-            cmbLowerGraphic.SelectedIndex =
-                cmbLowerGraphic.FindString(TextUtils.NullToNone(mEditorItem.Lower.Sprite));
+            cmbUpperGraphic!.SelectedIndex = cmbUpperGraphic.Items.IndexOf(
+                new ListItem { Text = TextUtils.NullToNone(mEditorItem.Upper.Sprite) }
+            );
+            nudUpperHorizontalFrames!.Value = mEditorItem.Upper.XFrames;
+            nudUpperVerticalFrames!.Value = mEditorItem.Upper.YFrames;
+            nudUpperFrameCount!.Value = mEditorItem.Upper.FrameCount;
+            nudUpperFrameDuration!.Value = mEditorItem.Upper.FrameSpeed;
+            nudUpperLoopCount!.Value = mEditorItem.Upper.LoopCount;
 
-            nudLowerHorizontalFrames.Value = mEditorItem.Lower.XFrames;
-            nudLowerVerticalFrames.Value = mEditorItem.Lower.YFrames;
-            nudLowerFrameCount.Value = mEditorItem.Lower.FrameCount;
-            UpdateLowerFrames();
-
-            nudLowerFrameDuration.Value = mEditorItem.Lower.FrameSpeed;
-            tmrLowerAnimation.Interval = (int)nudLowerFrameDuration.Value;
-            nudLowerLoopCount.Value = mEditorItem.Lower.LoopCount;
-
-            cmbUpperGraphic.SelectedIndex =
-                cmbUpperGraphic.FindString(TextUtils.NullToNone(mEditorItem.Upper.Sprite));
-
-            nudUpperHorizontalFrames.Value = mEditorItem.Upper.XFrames;
-            nudUpperVerticalFrames.Value = mEditorItem.Upper.YFrames;
-            nudUpperFrameCount.Value = mEditorItem.Upper.FrameCount;
-            UpdateUpperFrames();
-
-            nudUpperFrameDuration.Value = mEditorItem.Upper.FrameSpeed;
-            tmrUpperAnimation.Interval = (int)nudUpperFrameDuration.Value;
-            nudUpperLoopCount.Value = mEditorItem.Upper.LoopCount;
-
-            chkDisableLowerRotations.Checked = mEditorItem.Lower.DisableRotations;
-            chkDisableUpperRotations.Checked = mEditorItem.Upper.DisableRotations;
-
-            chkRenderAbovePlayer.Checked = mEditorItem.Lower.AlternateRenderLayer;
-            chkRenderBelowFringe.Checked = mEditorItem.Upper.AlternateRenderLayer;
-
-            LoadLowerLight();
-            DrawLowerFrame();
-            LoadUpperLight();
-            DrawUpperFrame();
+            chkDisableLowerRotations!.Checked = mEditorItem.Lower.DisableRotations;
+            chkDisableUpperRotations!.Checked = mEditorItem.Upper.DisableRotations;
+            chkRenderAbovePlayer!.Checked = mEditorItem.Lower.AlternateRenderLayer;
+            chkRenderBelowFringe!.Checked = mEditorItem.Upper.AlternateRenderLayer;
 
             if (mChanged.IndexOf(mEditorItem) == -1)
             {
@@ -263,564 +381,14 @@ public partial class FrmAnimation : EditorForm
         }
         else
         {
-            pnlContainer.Hide();
+            pnlContainer!.Visible = false;
         }
 
-        UpdateToolStripItems();
+        UpdateEditorButtons(mEditorItem != null);
     }
-
-    private void txtName_TextChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Name = txtName.Text;
-        lstGameObjects.UpdateText(txtName.Text);
-    }
-
-    private void cmbSound_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Sound = TextUtils.SanitizeNone(cmbSound?.Text);
-    }
-
-    private void chkCompleteSoundPlayback_CheckedChanged(object sender, EventArgs e)
-    {
-        mEditorItem.CompleteSound = chkCompleteSoundPlayback.Checked;
-    }
-
-    private void chkLoopSoundDuringPreview_CheckedChanged(object sender, EventArgs e)
-    {
-        loopSoundOnPreview = chkLoopSoundDuringPreview.Checked;
-    }
-
-    private void cmbLowerGraphic_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Lower.Sprite = TextUtils.SanitizeNone(cmbLowerGraphic?.Text);
-    }
-
-    private void cmbUpperGraphic_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Upper.Sprite = TextUtils.SanitizeNone(cmbUpperGraphic?.Text);
-    }
-
-    private void btnPlaySound_Click(object sender, EventArgs e)
-    {
-        PlayAnimationSound();
-    }
-
-    private void PlayAnimationSound()
-    {
-        if (cmbSound.SelectedIndex <= 0)
-        {
-            return;
-        }
-
-        soundPlayer.SoundLocation = "resources/sounds/" + mEditorItem.Sound;
-
-        soundPlayer.Play();
-    }
-
-    private void tmrLowerAnimation_Tick(object sender, EventArgs e)
-    {
-        if (mPlayLower)
-        {
-            mLowerFrame++;
-            if (mLowerFrame >= (int)nudLowerFrameCount.Value)
-            {
-                mLowerFrame = 0;
-            }
-
-            if (mLowerFrame == 1 && loopSoundOnPreview && !mPlayUpper)
-            {
-                PlayAnimationSound();
-            }
-        }
-    }
-
-    void UpdateLowerFrames()
-    {
-        LightDescriptor[] newArray;
-        scrlLowerFrame.Maximum = (int)nudLowerFrameCount.Value;
-        if (mEditorItem.Lower.Lights == null || mEditorItem.Lower.FrameCount != mEditorItem.Lower.Lights.Length)
-        {
-            newArray = new LightDescriptor[mEditorItem.Lower.FrameCount];
-            for (var i = 0; i < newArray.Length; i++)
-            {
-                if (mEditorItem.Lower.Lights != null && i < mEditorItem.Lower.Lights.Length)
-                {
-                    newArray[i] = mEditorItem.Lower.Lights[i];
-                }
-                else
-                {
-                    newArray[i] = new LightDescriptor(-1, -1);
-                }
-            }
-
-            mEditorItem.Lower.Lights = newArray;
-        }
-    }
-
-    void UpdateUpperFrames()
-    {
-        LightDescriptor[] newArray;
-        scrlUpperFrame.Maximum = (int)nudUpperFrameCount.Value;
-        if (mEditorItem.Upper.Lights == null || mEditorItem.Upper.FrameCount != mEditorItem.Upper.Lights.Length)
-        {
-            newArray = new LightDescriptor[mEditorItem.Upper.FrameCount];
-            for (var i = 0; i < newArray.Length; i++)
-            {
-                if (mEditorItem.Upper.Lights != null && i < mEditorItem.Upper.Lights.Length)
-                {
-                    newArray[i] = mEditorItem.Upper.Lights[i];
-                }
-                else
-                {
-                    newArray[i] = new LightDescriptor(-1, -1);
-                }
-            }
-
-            mEditorItem.Upper.Lights = newArray;
-        }
-    }
-
-    void DrawLowerFrame()
-    {
-        if (mLowerWindow == null || mEditorItem == null)
-        {
-            return;
-        }
-
-        if (!mPlayLower)
-        {
-            mLowerFrame = scrlLowerFrame.Value - 1;
-        }
-
-        var graphicsDevice = Core.Graphics.GetGraphicsDevice();
-        Core.Graphics.EndSpriteBatch();
-        graphicsDevice.SetRenderTarget(mLowerDarkness);
-        graphicsDevice.Clear(Microsoft.Xna.Framework.Color.Black);
-        if (mLowerFrame < mEditorItem.Lower.Lights.Length)
-        {
-            Core.Graphics.DrawLight(
-                picLowerAnimation.Width / 2 + mEditorItem.Lower.Lights[mLowerFrame].OffsetX,
-                picLowerAnimation.Height / 2 + mEditorItem.Lower.Lights[mLowerFrame].OffsetY,
-                mEditorItem.Lower.Lights[mLowerFrame], mLowerDarkness
-            );
-        }
-
-        Core.Graphics.DrawTexture(
-            Core.Graphics.GetWhiteTex(), new RectangleF(0, 0, 1, 1),
-            new RectangleF(0, 0, mLowerDarkness.Width, mLowerDarkness.Height),
-            System.Drawing.Color.FromArgb((byte)((float)(100 - scrlDarkness.Value) / 100f * 255), 255, 255, 255),
-            mLowerDarkness, BlendState.Additive
-        );
-
-        Core.Graphics.EndSpriteBatch();
-        graphicsDevice.SetRenderTarget(mLowerWindow);
-        graphicsDevice.Clear(Microsoft.Xna.Framework.Color.White);
-        var animTexture = GameContentManager.GetTexture(
-            GameContentManager.TextureType.Animation, cmbLowerGraphic.Text
-        );
-
-        if (animTexture != null)
-        {
-            long w = animTexture.Width / (int)nudLowerHorizontalFrames.Value;
-            long h = animTexture.Height / (int)nudLowerVerticalFrames.Value;
-            long x = 0;
-            if (mLowerFrame > 0)
-            {
-                x = mLowerFrame % (int)nudLowerHorizontalFrames.Value * w;
-            }
-
-            var y = (int)Math.Floor(mLowerFrame / nudLowerHorizontalFrames.Value) * h;
-            Core.Graphics.DrawTexture(
-                animTexture, new RectangleF(x, y, w, h),
-                new RectangleF(
-                    picLowerAnimation.Width / 2 - (int)w / 2, (int)picLowerAnimation.Height / 2 - (int)h / 2, w,
-                    h
-                ), mLowerWindow
-            );
-        }
-
-        Core.Graphics.DrawTexture(mLowerDarkness, 0, 0, mLowerWindow, Core.Graphics.MultiplyState);
-        Core.Graphics.EndSpriteBatch();
-        mLowerWindow.Present();
-    }
-
-    void DrawUpperFrame()
-    {
-        if (mUpperWindow == null || mEditorItem == null)
-        {
-            return;
-        }
-
-        if (!mPlayUpper)
-        {
-            mUpperFrame = scrlUpperFrame.Value - 1;
-        }
-
-        var graphicsDevice = Core.Graphics.GetGraphicsDevice();
-        Core.Graphics.EndSpriteBatch();
-        graphicsDevice.SetRenderTarget(mUpperDarkness);
-        graphicsDevice.Clear(Microsoft.Xna.Framework.Color.Black);
-        if (mUpperFrame < mEditorItem.Upper.Lights.Length)
-        {
-            Core.Graphics.DrawLight(
-                picUpperAnimation.Width / 2 + mEditorItem.Upper.Lights[mUpperFrame].OffsetX,
-                picUpperAnimation.Height / 2 + mEditorItem.Upper.Lights[mUpperFrame].OffsetY,
-                mEditorItem.Upper.Lights[mUpperFrame], mUpperDarkness
-            );
-        }
-
-        Core.Graphics.DrawTexture(
-            Core.Graphics.GetWhiteTex(), new RectangleF(0, 0, 1, 1),
-            new RectangleF(0, 0, mUpperDarkness.Width, mUpperDarkness.Height),
-            System.Drawing.Color.FromArgb((byte)((float)(100 - scrlDarkness.Value) / 100f * 255), 255, 255, 255),
-            mUpperDarkness, BlendState.Additive
-        );
-
-        Core.Graphics.EndSpriteBatch();
-        graphicsDevice.SetRenderTarget(mUpperWindow);
-        graphicsDevice.Clear(Microsoft.Xna.Framework.Color.White);
-        var animTexture = GameContentManager.GetTexture(
-            GameContentManager.TextureType.Animation, cmbUpperGraphic.Text
-        );
-
-        if (animTexture != null)
-        {
-            long w = animTexture.Width / (int)nudUpperHorizontalFrames.Value;
-            long h = animTexture.Height / (int)nudUpperVerticalFrames.Value;
-            long x = 0;
-            if (mUpperFrame > 0)
-            {
-                x = mUpperFrame % (int)nudUpperHorizontalFrames.Value * w;
-            }
-
-            var y = (int)Math.Floor(mUpperFrame / nudUpperHorizontalFrames.Value) * h;
-            Core.Graphics.DrawTexture(
-                animTexture, new RectangleF(x, y, w, h),
-                new RectangleF(
-                    picUpperAnimation.Width / 2 - (int)w / 2, (int)picUpperAnimation.Height / 2 - (int)h / 2, w,
-                    h
-                ), mUpperWindow
-            );
-        }
-
-        Core.Graphics.DrawTexture(mUpperDarkness, 0, 0, mUpperWindow, Core.Graphics.MultiplyState);
-        Core.Graphics.EndSpriteBatch();
-        mUpperWindow.Present();
-    }
-
-    private void tmrUpperAnimation_Tick(object sender, EventArgs e)
-    {
-        if (mPlayUpper)
-        {
-            mUpperFrame++;
-            if (mUpperFrame >= (int)nudUpperFrameCount.Value)
-            {
-                mUpperFrame = 0;
-            }
-
-            if (mUpperFrame == 1 && loopSoundOnPreview && (!mPlayLower || (mPlayLower && mPlayUpper)))
-            {
-                PlayAnimationSound();
-            }
-        }
-    }
-
-    private void frmAnimation_FormClosed(object sender, FormClosedEventArgs e)
-    {
-        btnCancel_Click(null, null);
-    }
-
-    private void scrlLowerFrame_Scroll(object sender, ScrollValueEventArgs e)
-    {
-        lblLowerFrame.Text = Strings.AnimationEditor.FrameX.ToString(scrlLowerFrame.Value);
-        LoadLowerLight();
-        DrawLowerFrame();
-    }
-
-    private void LoadLowerLight()
-    {
-        lightEditorLower.CanClose = false;
-        lightEditorLower.LoadEditor(mEditorItem.Lower.Lights[scrlLowerFrame.Value - 1]);
-    }
-
-    private void LoadUpperLight()
-    {
-        lightEditorUpper.CanClose = false;
-        lightEditorUpper.LoadEditor(mEditorItem.Upper.Lights[scrlUpperFrame.Value - 1]);
-    }
-
-    private void scrlUpperFrame_Scroll(object sender, ScrollValueEventArgs e)
-    {
-        lblUpperFrame.Text = Strings.AnimationEditor.FrameX.ToString(scrlUpperFrame.Value);
-        LoadUpperLight();
-        DrawUpperFrame();
-    }
-
-    private void btnPlayLower_Click(object sender, EventArgs e)
-    {
-        mPlayLower = !mPlayLower;
-        if (mPlayLower)
-        {
-            _tooltip.SetToolTip(btnPlayLower, Strings.AnimationEditor.Pause);
-            btnPlayLower.ImageKey = "sharp_pause_white_48dp.png";
-        }
-        else
-        {
-            _tooltip.SetToolTip(btnPlayLower, Strings.AnimationEditor.Play);
-            btnPlayLower.ImageKey = "sharp_play_arrow_white_48dp.png";
-            soundPlayer.Stop();
-        }
-    }
-
-    private void btnLowerClone_Click(object sender, EventArgs e)
-    {
-        if (scrlLowerFrame.Value > 1)
-        {
-            mEditorItem.Lower.Lights[scrlLowerFrame.Value - 1] =
-                new LightDescriptor(mEditorItem.Lower.Lights[scrlLowerFrame.Value - 2]);
-
-            LoadLowerLight();
-            DrawLowerFrame();
-        }
-    }
-
-    private void btnPlayUpper_Click(object sender, EventArgs e)
-    {
-        mPlayUpper = !mPlayUpper;
-        if (mPlayUpper)
-        {
-            _tooltip.SetToolTip(btnPlayUpper, Strings.AnimationEditor.Pause);
-            btnPlayUpper.ImageKey = "sharp_pause_white_48dp.png";
-        }
-        else
-        {
-            _tooltip.SetToolTip(btnPlayUpper, Strings.AnimationEditor.Play);
-            btnPlayUpper.ImageKey = "sharp_play_arrow_white_48dp.png";
-            soundPlayer.Stop();
-        }
-    }
-
-    private void btnUpperClone_Click(object sender, EventArgs e)
-    {
-        if (scrlUpperFrame.Value > 1)
-        {
-            mEditorItem.Upper.Lights[scrlUpperFrame.Value - 1] =
-                new LightDescriptor(mEditorItem.Upper.Lights[scrlUpperFrame.Value - 2]);
-
-            LoadUpperLight();
-            DrawUpperFrame();
-        }
-    }
-
-    private void scrlDarkness_Scroll(object sender, ScrollValueEventArgs e)
-    {
-        labelDarkness.Text = Strings.AnimationEditor.simulatedarkness.ToString(scrlDarkness.Value);
-    }
-
-    private void btnSwap_Click(object sender, EventArgs e)
-    {
-        var lowerAnimSprite = mEditorItem.Lower.Sprite;
-        var lowerAnimXFrames = mEditorItem.Lower.XFrames;
-        var lowerAnimYFrames = mEditorItem.Lower.YFrames;
-        var lowerAnimFrameCount = mEditorItem.Lower.FrameCount;
-        var lowerAnimFrameSpeed = mEditorItem.Lower.FrameSpeed;
-        var lowerAnimLoopCount = mEditorItem.Lower.LoopCount;
-        var disableLowerRotations = mEditorItem.Lower.DisableRotations;
-        var lowerLights = mEditorItem.Lower.Lights;
-        mEditorItem.Lower.Sprite = mEditorItem.Upper.Sprite;
-        mEditorItem.Lower.XFrames = mEditorItem.Upper.XFrames;
-        mEditorItem.Lower.YFrames = mEditorItem.Upper.YFrames;
-        mEditorItem.Lower.FrameCount = mEditorItem.Upper.FrameCount;
-        mEditorItem.Lower.FrameSpeed = mEditorItem.Upper.FrameSpeed;
-        mEditorItem.Lower.LoopCount = mEditorItem.Upper.LoopCount;
-        mEditorItem.Lower.Lights = mEditorItem.Upper.Lights;
-        mEditorItem.Lower.DisableRotations = mEditorItem.Upper.DisableRotations;
-
-        mEditorItem.Upper.Sprite = lowerAnimSprite;
-        mEditorItem.Upper.XFrames = lowerAnimXFrames;
-        mEditorItem.Upper.YFrames = lowerAnimYFrames;
-        mEditorItem.Upper.FrameCount = lowerAnimFrameCount;
-        mEditorItem.Upper.FrameSpeed = lowerAnimFrameSpeed;
-        mEditorItem.Upper.LoopCount = lowerAnimLoopCount;
-        mEditorItem.Upper.Lights = lowerLights;
-        mEditorItem.Upper.DisableRotations = disableLowerRotations;
-
-        mUpperFrame = 0;
-        mLowerFrame = 0;
-
-        UpdateEditor();
-    }
-
-    private void toolStripItemNew_Click(object sender, EventArgs e)
-    {
-        PacketSender.SendCreateObject(GameObjectType.Animation);
-    }
-
-    private void toolStripItemDelete_Click(object sender, EventArgs e)
-    {
-        if (mEditorItem != null && lstGameObjects.Focused)
-        {
-            if (DarkMessageBox.ShowWarning(
-                    Strings.AnimationEditor.deleteprompt, Strings.AnimationEditor.deletetitle,
-                    DarkDialogButton.YesNo, Icon
-                ) ==
-                DialogResult.Yes)
-            {
-                PacketSender.SendDeleteObject(mEditorItem);
-            }
-        }
-    }
-
-    private void toolStripItemCopy_Click(object sender, EventArgs e)
-    {
-        if (mEditorItem != null && lstGameObjects.Focused)
-        {
-            mCopiedItem = mEditorItem.JsonData;
-            toolStripItemPaste.Enabled = true;
-        }
-    }
-
-    private void toolStripItemPaste_Click(object sender, EventArgs e)
-    {
-        if (mEditorItem != null && mCopiedItem != null && lstGameObjects.Focused)
-        {
-            mEditorItem.Load(mCopiedItem, true);
-            UpdateEditor();
-        }
-    }
-
-    private void toolStripItemUndo_Click(object sender, EventArgs e)
-    {
-        if (mChanged.Contains(mEditorItem) && mEditorItem != null)
-        {
-            if (DarkMessageBox.ShowWarning(
-                    Strings.AnimationEditor.undoprompt, Strings.AnimationEditor.undotitle, DarkDialogButton.YesNo,
-                    Icon
-                ) ==
-                DialogResult.Yes)
-            {
-                mEditorItem.RestoreBackup();
-                UpdateEditor();
-            }
-        }
-    }
-
-    private void UpdateToolStripItems()
-    {
-        toolStripItemCopy.Enabled = mEditorItem != null && lstGameObjects.Focused;
-        toolStripItemPaste.Enabled = mEditorItem != null && mCopiedItem != null && lstGameObjects.Focused;
-        toolStripItemDelete.Enabled = mEditorItem != null && lstGameObjects.Focused;
-        toolStripItemUndo.Enabled = mEditorItem != null && lstGameObjects.Focused;
-    }
-
-    private void form_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Control)
-        {
-            if (e.KeyCode == Keys.N)
-            {
-                toolStripItemNew_Click(null, null);
-            }
-        }
-    }
-
-    private void CheckFrameCounts()
-    {
-        nudLowerFrameCount.Value = Math.Min(mEditorItem.Lower.FrameCount, mEditorItem.Lower.XFrames * mEditorItem.Lower.YFrames);
-        nudUpperFrameCount.Value = Math.Min(mEditorItem.Upper.FrameCount, mEditorItem.Upper.XFrames * mEditorItem.Upper.YFrames);
-    }
-
-    private void nudLowerHorizontalFrames_ValueChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Lower.XFrames = (int)nudLowerHorizontalFrames.Value;
-        CheckFrameCounts();
-    }
-
-    private void nudLowerVerticalFrames_ValueChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Lower.YFrames = (int)nudLowerVerticalFrames.Value;
-        CheckFrameCounts();
-    }
-
-    private void nudLowerFrameCount_ValueChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Lower.FrameCount = (int)nudLowerFrameCount.Value;
-        CheckFrameCounts();
-        UpdateLowerFrames();
-    }
-
-    private void nudLowerFrameDuration_ValueChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Lower.FrameSpeed = (int)nudLowerFrameDuration.Value;
-        tmrLowerAnimation.Interval = (int)nudLowerFrameDuration.Value;
-    }
-
-    private void nudLowerLoopCount_ValueChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Lower.LoopCount = (int)nudLowerLoopCount.Value;
-    }
-
-    private void nudUpperHorizontalFrames_ValueChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Upper.XFrames = (int)nudUpperHorizontalFrames.Value;
-        CheckFrameCounts();
-    }
-
-    private void nudUpperVerticalFrames_ValueChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Upper.YFrames = (int)nudUpperVerticalFrames.Value;
-        CheckFrameCounts();
-    }
-
-    private void nudUpperFrameCount_ValueChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Upper.FrameCount = (int)nudUpperFrameCount.Value;
-        CheckFrameCounts();
-        UpdateUpperFrames();
-    }
-
-    private void nudUpperFrameDuration_ValueChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Upper.FrameSpeed = (int)nudUpperFrameDuration.Value;
-        tmrUpperAnimation.Interval = (int)nudUpperFrameDuration.Value;
-    }
-
-    private void nudUpperLoopCount_ValueChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Upper.LoopCount = (int)nudUpperLoopCount.Value;
-    }
-
-    private void tmrRender_Tick(object sender, EventArgs e)
-    {
-        DrawLowerFrame();
-        DrawUpperFrame();
-    }
-
-    private void chkDisableLowerRotations_CheckedChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Lower.DisableRotations = chkDisableLowerRotations.Checked;
-    }
-
-    private void chkDisableUpperRotations_CheckedChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Upper.DisableRotations = chkDisableUpperRotations.Checked;
-    }
-
-    private void chkRenderAbovePlayer_CheckedChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Lower.AlternateRenderLayer = chkRenderAbovePlayer.Checked;
-    }
-
-    private void chkRenderBelowFringe_CheckedChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Upper.AlternateRenderLayer = chkRenderBelowFringe.Checked;
-    }
-
-    #region "Item List - Folders, Searching, Sorting, Etc"
 
     public void InitEditor()
     {
-        //Collect folders
         var mFolders = new List<string>();
         foreach (var anim in AnimationDescriptor.Lookup)
         {
@@ -837,84 +405,25 @@ public partial class FrmAnimation : EditorForm
 
         mFolders.Sort();
         mKnownFolders.Sort();
-        cmbFolder.Items.Clear();
+        cmbFolder!.Items.Clear();
         cmbFolder.Items.Add("");
-        cmbFolder.Items.AddRange(mKnownFolders.ToArray());
-
-        var items = AnimationDescriptor.Lookup.OrderBy(p => p.Value?.Name).Select(pair => new KeyValuePair<Guid, KeyValuePair<string, string>>(pair.Key,
-            new KeyValuePair<string, string>(((AnimationDescriptor)pair.Value)?.Name ?? Models.DatabaseObject<AnimationDescriptor>.Deleted, ((AnimationDescriptor)pair.Value)?.Folder ?? ""))).ToArray();
-        lstGameObjects.Repopulate(items, mFolders, btnAlphabetical.Checked, CustomSearch(), txtSearch.Text);
-    }
-
-    private void btnAddFolder_Click(object sender, EventArgs e)
-    {
-        var folderName = string.Empty;
-        var result = DarkInputBox.ShowInformation(
-            Strings.AnimationEditor.folderprompt, Strings.AnimationEditor.foldertitle, ref folderName,
-            DarkDialogButton.OkCancel
-        );
-
-        if (result == DialogResult.OK && !string.IsNullOrEmpty(folderName))
+        foreach (var folder in mKnownFolders)
         {
-            if (!cmbFolder.Items.Contains(folderName))
+            cmbFolder.Items.Add(folder);
+        }
+
+        if (lstGameObjects != null)
+        {
+            lstGameObjects.Items.Clear();
+            var items = AnimationDescriptor.Lookup.OrderBy(p => p.Value?.Name);
+            foreach (var pair in items)
             {
-                mEditorItem.Folder = folderName;
-                lstGameObjects.ExpandFolder(folderName);
-                InitEditor();
-                cmbFolder.Text = folderName;
+                var anim = (AnimationDescriptor?)pair.Value;
+                if (anim != null)
+                {
+                    lstGameObjects.Items.Add(new ListItem { Key = pair.Key.ToString(), Text = anim.Name ?? "Deleted" });
+                }
             }
         }
     }
-
-    private void cmbFolder_SelectedIndexChanged(object sender, EventArgs e)
-    {
-        mEditorItem.Folder = cmbFolder.Text;
-        InitEditor();
-    }
-
-    private void btnAlphabetical_Click(object sender, EventArgs e)
-    {
-        btnAlphabetical.Checked = !btnAlphabetical.Checked;
-        InitEditor();
-    }
-
-    private void txtSearch_TextChanged(object sender, EventArgs e)
-    {
-        InitEditor();
-    }
-
-    private void txtSearch_Leave(object sender, EventArgs e)
-    {
-        if (string.IsNullOrWhiteSpace(txtSearch.Text))
-        {
-            txtSearch.Text = Strings.AnimationEditor.searchplaceholder;
-        }
-    }
-
-    private void txtSearch_Enter(object sender, EventArgs e)
-    {
-        txtSearch.SelectAll();
-        txtSearch.Focus();
-    }
-
-    private void btnClearSearch_Click(object sender, EventArgs e)
-    {
-        txtSearch.Text = Strings.AnimationEditor.searchplaceholder;
-    }
-
-    private bool CustomSearch()
-    {
-        return !string.IsNullOrWhiteSpace(txtSearch.Text) &&
-               txtSearch.Text != Strings.AnimationEditor.searchplaceholder;
-    }
-
-    private void txtSearch_Click(object sender, EventArgs e)
-    {
-        if (txtSearch.Text == Strings.AnimationEditor.searchplaceholder)
-        {
-            txtSearch.SelectAll();
-        }
-    }
-
-    #endregion
 }

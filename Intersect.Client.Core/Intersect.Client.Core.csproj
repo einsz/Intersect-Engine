@@ -34,7 +34,9 @@
   </ItemGroup>
 
   <ItemGroup Label="Project Embedded Resources">
-    <EmbeddedResource Include="$(NetworkHandshakePublicKey)" />
+    <EmbeddedResource Include="$(NetworkHandshakePublicKey)">
+      <LogicalName>Intersect.Client.network.handshake.bkey.pub</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="Resources\MonoGame.Framework.dll.config" />
     <EmbeddedResource Include="Resources\openal32.dll" />
     <EmbeddedResource Include="Resources\Shaders\radialgradient.xnb" />

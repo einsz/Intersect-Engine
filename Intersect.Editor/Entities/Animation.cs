@@ -1,4 +1,5 @@
-﻿using Intersect.Editor.Content;
+﻿using System.Drawing;
+using Intersect.Editor.Content;
 using Intersect.Framework.Core;
 using Intersect.Framework.Core.GameObjects.Animations;
 using Intersect.GameObjects;

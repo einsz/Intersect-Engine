@@ -1,9 +1,12 @@
+using System.Drawing;
 using System.Drawing.Imaging;
+using Eto.Drawing;
+using SysBitmap = System.Drawing.Bitmap;
+using SysRectangleF = System.Drawing.RectangleF;
+using SysPixelFormat = System.Drawing.Imaging.PixelFormat;
 using Intersect.Config;
 using Intersect.Editor.Content;
 using Intersect.Editor.Entities;
-using Intersect.Editor.Forms.DockingElements;
-using Intersect.Editor.Forms.Helpers;
 using Intersect.Editor.General;
 using Intersect.Editor.Maps;
 using Intersect.Enums;
@@ -20,6 +23,7 @@ using Intersect.Utilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using Eto.Forms;
 
 namespace Intersect.Editor.Core;
 
@@ -80,9 +84,10 @@ public static partial class Graphics
     private static List<KeyValuePair<Microsoft.Xna.Framework.Point, LightDescriptor>> sLightQueue =
         new List<KeyValuePair<Microsoft.Xna.Framework.Point, LightDescriptor>>();
 
-    private static SwapChainRenderTarget sMapEditorChain;
+    // Use RenderTarget2D instead of SwapChainRenderTarget for cross-platform support
+    private static RenderTarget2D sMapEditorChain;
 
-    private static SwapChainRenderTarget sMapGridChain;
+    private static RenderTarget2D sMapGridChain;
 
     private static PresentationParameters sPresentationParams = new PresentationParameters();
 
@@ -94,7 +99,7 @@ public static partial class Graphics
 
     private static bool sSpriteBatchBegan;
 
-    private static SwapChainRenderTarget sTilesetChain;
+    private static RenderTarget2D sTilesetChain;
 
     private static RenderTarget2D sWhiteTex;
 
@@ -106,29 +111,23 @@ public static partial class Graphics
 
     private static float _npcColorPulseRatio;
 
-    //Setup and Loading
+    // Cached texture data for UI display
+    private static int[] sMapEditorData;
+    private static int[] sMapGridData;
+    private static int[] sTilesetData;
+
+    // Eto.Forms bitmap cache for Linux rendering
+    private static Dictionary<string, Eto.Drawing.Bitmap?> sTilesetBitmaps = new();
+    private static Eto.Drawing.Bitmap? sRenderedMapBitmap;
+    private static bool sMapNeedsRedraw = true;
+    private static object sRenderLock = new();
+
     public static void InitMonogame()
     {
         try
         {
-            //Create the Graphics Device
-            sPresentationParams.IsFullScreen = false;
-            sPresentationParams.BackBufferWidth = (Options.Instance.Map.TileWidth + 2) * Options.Instance.Map.MapWidth;
-            sPresentationParams.BackBufferHeight = (Options.Instance.Map.TileHeight + 2) * Options.Instance.Map.MapHeight;
-            sPresentationParams.RenderTargetUsage = RenderTargetUsage.DiscardContents;
-            sPresentationParams.PresentationInterval = PresentInterval.Immediate;
-
-            // Create device
-            sGraphicsDevice = new GraphicsDevice(
-                GraphicsAdapter.DefaultAdapter, GraphicsProfile.HiDef, sPresentationParams
-            );
-
-            //Define our spritebatch :D
-            sSpriteBatch = new SpriteBatch(sGraphicsDevice);
-
-            SetupWhiteTex();
-
-            //Load the rest of the graphics and audio
+            // On DesktopGL, we can't create a headless GraphicsDevice
+            // Just load content and skip the device creation
             GameContentManager.LoadEditorContent();
 
             //Create our multiplicative blending state.
@@ -141,30 +140,74 @@ public static partial class Graphics
         }
         catch (Exception ex)
         {
-            // ignored
-            MessageBox.Show("Failed to initialize MonoGame. Exception Info: " + ex + "\nClosing Now");
-            Application.Exit();
+            Intersect.Core.ApplicationContext.CurrentContext?.Logger?.LogWarning(ex, "MonoGame initialization warning");
         }
     }
 
-    public static GraphicsDevice GetGraphicsDevice()
+    public static GraphicsDevice? GetGraphicsDevice()
     {
         return sGraphicsDevice;
     }
 
-    public static void SetMapGridChain(SwapChainRenderTarget chain)
+    public static void SetMapGridChain(RenderTarget2D chain)
     {
         sMapGridChain = chain;
     }
 
-    public static void SetMapEditorChain(SwapChainRenderTarget chain)
+    public static void SetMapEditorChain(RenderTarget2D chain)
     {
         sMapEditorChain = chain;
     }
 
-    public static void SetTilesetChain(SwapChainRenderTarget chain)
+    public static void SetTilesetChain(RenderTarget2D chain)
     {
         sTilesetChain = chain;
+    }
+
+    // Get rendered data for display in Eto.Forms
+    public static int[] GetMapEditorData()
+    {
+        return sMapEditorData;
+    }
+
+    public static int[] GetMapGridData()
+    {
+        return sMapGridData;
+    }
+
+    public static int[] GetTilesetData()
+    {
+        return sTilesetData;
+    }
+
+    public static int GetMapEditorWidth()
+    {
+        return sMapEditorChain?.Width ?? 0;
+    }
+
+    public static int GetMapEditorHeight()
+    {
+        return sMapEditorChain?.Height ?? 0;
+    }
+
+    public static int GetMapGridWidth()
+    {
+        return sMapGridChain?.Width ?? 0;
+    }
+
+    public static int GetMapGridHeight()
+    {
+        return sMapGridChain?.Height ?? 0;
+    }
+
+    public static int GetTilesetWidth()
+    {
+        return sTilesetChain?.Width ?? 0;
+    }
+
+    public static int GetTilesetHeight()
+    {
+        return sTilesetChain?.Height ?? 0;
     }
 
     //Resource Allocation
@@ -192,7 +235,7 @@ public static partial class Graphics
     //Rendering
     public static void Render()
     {
-        if (sMapEditorChain != null && !sMapEditorChain.IsContentLost && !sMapEditorChain.IsDisposed)
+        if (sMapEditorChain != null && !sMapEditorChain.IsDisposed)
         {
             lock (GraphicsLock)
             {
@@ -383,7 +426,8 @@ public static partial class Graphics
                 }
 
                 EndSpriteBatch();
-                sMapEditorChain.Present();
+                // Extract data from render target for display in Eto.Forms
+                ExtractRenderData(sMapEditorChain, ref sMapEditorData);
             }
         }
     }
@@ -393,8 +437,8 @@ public static partial class Graphics
         for (var x = 0; x < Options.Instance.Map.MapWidth; x++)
         {
             DrawTexture(
-                sWhiteTex, new RectangleF(0, 0, 1, 1),
-                new RectangleF(
+                sWhiteTex, new SysRectangleF(0, 0, 1, 1),
+                new SysRectangleF(
                     CurrentView.Left + x * Options.Instance.Map.TileWidth, CurrentView.Top, 1,
                     Options.Instance.Map.MapHeight * Options.Instance.Map.TileHeight
                 ), null
@@ -404,8 +448,8 @@ public static partial class Graphics
         for (var y = 0; y < Options.Instance.Map.MapHeight; y++)
         {
             DrawTexture(
-                sWhiteTex, new RectangleF(0, 0, 1, 1),
-                new RectangleF(
+                sWhiteTex, new SysRectangleF(0, 0, 1, 1),
+                new SysRectangleF(
                     CurrentView.Left, CurrentView.Top + y * Options.Instance.Map.TileHeight,
                     Options.Instance.Map.MapWidth * Options.Instance.Map.TileWidth, 1
                 ), null
@@ -433,8 +477,8 @@ public static partial class Graphics
                 ).IntersectsWith(new System.Drawing.Rectangle(0, 0, CurrentView.Width, CurrentView.Height)))
                 {
                     DrawTexture(
-                        transTex, new RectangleF(0, 0, transTex.Width, transTex.Height),
-                        new RectangleF(
+                        transTex, new SysRectangleF(0, 0, transTex.Width, transTex.Height),
+                        new SysRectangleF(
                             xoffset + x * Options.Instance.Map.TileWidth, yoffset + y * Options.Instance.Map.TileHeight, Options.Instance.Map.TileWidth,
                             Options.Instance.Map.TileHeight
                         ), System.Drawing.Color.White, null
@@ -909,7 +953,7 @@ public static partial class Graphics
 
                 if (attributesTex != null)
                 {
-                    var whiteTextureBounds = new RectangleF(
+                    var whiteTextureBounds = new SysRectangleF(
                         sWhiteTex.Bounds.X,
                         sWhiteTex.Bounds.Y,
                         sWhiteTex.Bounds.Width,
@@ -927,7 +971,7 @@ public static partial class Graphics
                                 continue;
                             }
 
-                            var tileBounds = new RectangleF(
+                            var tileBounds = new SysRectangleF(
                                 CurrentView.Left + x * Options.Instance.Map.TileWidth,
                                 CurrentView.Top + y * Options.Instance.Map.TileHeight,
                                 Options.Instance.Map.TileWidth,
@@ -939,7 +983,7 @@ public static partial class Graphics
                                 var blue = (attr is MapWarpAttribute warp && warp.ChangeInstance) ? 0 : 255;
                                 DrawTexture(
                                    attributesTex,
-                                   new RectangleF(
+                                   new SysRectangleF(
                                        0,
                                        ((int)tmpMap.Attributes[x, y].Type - 1) * attributesTex.Width,
                                        attributesTex.Width,
@@ -975,8 +1019,8 @@ public static partial class Graphics
                         if (eventTex != null)
                         {
                             DrawTexture(
-                                eventTex, new RectangleF(0, 0, eventTex.Width, eventTex.Height),
-                                new RectangleF(
+                                eventTex, new SysRectangleF(0, 0, eventTex.Width, eventTex.Height),
+                                new SysRectangleF(
                                     CurrentView.Left + x * Options.Instance.Map.TileWidth,
                                     CurrentView.Top + y * Options.Instance.Map.TileHeight, Options.Instance.Map.TileWidth, Options.Instance.Map.TileHeight
                                 ), System.Drawing.Color.White, null
@@ -1016,17 +1060,13 @@ public static partial class Graphics
                             _npcColorPulseRatio = (float)(Math.Sin(2 * Math.PI * (currentTime / 1000.0)) + 1) / 2;
                             _lastNpcPulseColorUpdate = currentTime;
                         }
-                        if (FrmMapLayers.NpcPulseColor == default)
-                        {
-                            FrmMapLayers.NpcPulseColor = System.Drawing.Color.Red;
-                        }
-
-                        spawnColor = GridHelper.ColorInterpolate(spawnColor, FrmMapLayers.NpcPulseColor, _npcColorPulseRatio);
+                        var npcPulseColor = System.Drawing.Color.Red;
+                        spawnColor = ColorInterpolate(spawnColor, npcPulseColor, _npcColorPulseRatio);
                     }
 
                     DrawTexture(
-                        spawnTex, new RectangleF(0, 0, spawnTex.Width, spawnTex.Height),
-                        new RectangleF(
+                        spawnTex, new SysRectangleF(0, 0, spawnTex.Width, spawnTex.Height),
+                        new SysRectangleF(
                             CurrentView.Left + tmpMap.Spawns[i].X * Options.Instance.Map.TileWidth,
                             CurrentView.Top + tmpMap.Spawns[i].Y * Options.Instance.Map.TileHeight, Options.Instance.Map.TileWidth,
                             Options.Instance.Map.TileHeight
@@ -1067,24 +1107,22 @@ public static partial class Graphics
     private static void DrawBoxOutline(int x, int y, int w, int h, System.Drawing.Color clr, RenderTarget2D target)
     {
         //Draw Top of Box
-        DrawTexture(sWhiteTex, new RectangleF(0, 0, 1, 1), new RectangleF(x, y, w, 1), clr, target);
+        DrawTexture(sWhiteTex, new SysRectangleF(0, 0, 1, 1), new SysRectangleF(x, y, w, 1), clr, target);
 
         //Bottom
-        DrawTexture(sWhiteTex, new RectangleF(0, 0, 1, 1), new RectangleF(x, y + h, w, 1), clr, target);
+        DrawTexture(sWhiteTex, new SysRectangleF(0, 0, 1, 1), new SysRectangleF(x, y + h, w, 1), clr, target);
 
         //Left
-        DrawTexture(sWhiteTex, new RectangleF(0, 0, 1, 1), new RectangleF(x, y, 1, h), clr, target);
+        DrawTexture(sWhiteTex, new SysRectangleF(0, 0, 1, 1), new SysRectangleF(x, y, 1, h), clr, target);
 
         //Right
-        DrawTexture(sWhiteTex, new RectangleF(0, 0, 1, 1), new RectangleF(x + w, y, 1, h), clr, target);
+        DrawTexture(sWhiteTex, new SysRectangleF(0, 0, 1, 1), new SysRectangleF(x + w, y, 1, h), clr, target);
     }
 
     public static void DrawMapGrid()
     {
         if (sMapGridChain == null ||
-            sMapGridChain.IsContentLost ||
-            sMapGridChain.IsDisposed ||
-            Globals.MapGridWindowNew.DockPanel.ActiveDocument != Globals.MapGridWindowNew)
+            sMapGridChain.IsDisposed)
         {
             return;
         }
@@ -1115,8 +1153,8 @@ public static partial class Graphics
                             grid.Grid[x - 1, y - 1].MapId == Guid.Empty)
                         {
                             DrawTexture(
-                                GetWhiteTex(), new RectangleF(0, 0, 1, 1),
-                                new RectangleF(
+                                GetWhiteTex(), new SysRectangleF(0, 0, 1, 1),
+                                new SysRectangleF(
                                     grid.ContentRect.X + x * grid.TileWidth,
                                     grid.ContentRect.Y + y * grid.TileHeight, grid.TileWidth, grid.TileHeight
                                 ), System.Drawing.Color.FromArgb(45, 45, 48), sMapGridChain
@@ -1138,8 +1176,8 @@ public static partial class Graphics
                                 else
                                 {
                                     DrawTexture(
-                                        GetWhiteTex(), new RectangleF(0, 0, 1, 1),
-                                        new RectangleF(
+                                        GetWhiteTex(), new SysRectangleF(0, 0, 1, 1),
+                                        new SysRectangleF(
                                             grid.ContentRect.X + x * grid.TileWidth,
                                             grid.ContentRect.Y + y * grid.TileHeight, grid.TileWidth,
                                             grid.TileHeight
@@ -1150,8 +1188,8 @@ public static partial class Graphics
                             else
                             {
                                 DrawTexture(
-                                    GetWhiteTex(), new RectangleF(0, 0, 1, 1),
-                                    new RectangleF(
+                                    GetWhiteTex(), new SysRectangleF(0, 0, 1, 1),
+                                    new SysRectangleF(
                                         grid.ContentRect.X + x * grid.TileWidth,
                                         grid.ContentRect.Y + y * grid.TileHeight, grid.TileWidth, grid.TileHeight
                                     ), System.Drawing.Color.Gray, sMapGridChain
@@ -1162,32 +1200,32 @@ public static partial class Graphics
                         if (Globals.MapGrid.ShowLines)
                         {
                             DrawTexture(
-                                GetWhiteTex(), new RectangleF(0, 0, 1, 1),
-                                new RectangleF(
+                                GetWhiteTex(), new SysRectangleF(0, 0, 1, 1),
+                                new SysRectangleF(
                                     grid.ContentRect.X + x * grid.TileWidth,
                                     grid.ContentRect.Y + y * grid.TileHeight, grid.TileWidth, 1
                                 ), System.Drawing.Color.DarkGray, sMapGridChain
                             );
 
                             DrawTexture(
-                                GetWhiteTex(), new RectangleF(0, 0, 1, 1),
-                                new RectangleF(
+                                GetWhiteTex(), new SysRectangleF(0, 0, 1, 1),
+                                new SysRectangleF(
                                     grid.ContentRect.X + x * grid.TileWidth,
                                     grid.ContentRect.Y + y * grid.TileHeight, 1, grid.TileHeight
                                 ), System.Drawing.Color.DarkGray, sMapGridChain
                             );
 
                             DrawTexture(
-                                GetWhiteTex(), new RectangleF(0, 0, 1, 1),
-                                new RectangleF(
+                                GetWhiteTex(), new SysRectangleF(0, 0, 1, 1),
+                                new SysRectangleF(
                                     grid.ContentRect.X + x * grid.TileWidth + grid.TileWidth,
                                     grid.ContentRect.Y + y * grid.TileHeight, 1, grid.TileHeight
                                 ), System.Drawing.Color.DarkGray, sMapGridChain
                             );
 
                             DrawTexture(
-                                GetWhiteTex(), new RectangleF(0, 0, 1, 1),
-                                new RectangleF(
+                                GetWhiteTex(), new SysRectangleF(0, 0, 1, 1),
+                                new SysRectangleF(
                                     grid.ContentRect.X + x * grid.TileWidth,
                                     grid.ContentRect.Y + y * grid.TileHeight + grid.TileHeight, grid.TileWidth, 1
                                 ), System.Drawing.Color.DarkGray, sMapGridChain
@@ -1199,7 +1237,7 @@ public static partial class Graphics
         }
 
         EndSpriteBatch();
-        sMapGridChain.Present();
+        ExtractRenderData(sMapGridChain, ref sMapGridData);
     }
 
     private static void SetRenderTarget(RenderTarget2D target)
@@ -1211,9 +1249,8 @@ public static partial class Graphics
     public static void DrawTileset()
     {
         if (sTilesetChain == null ||
-            sTilesetChain.IsContentLost ||
             sTilesetChain.IsDisposed ||
-            Globals.MapLayersWindow.CurrentTab != LayerTabs.Tiles)
+            Globals.MapLayersWindow?.CurrentTab != 0)
         {
             return;
         }
@@ -1254,48 +1291,48 @@ public static partial class Graphics
         }
 
         EndSpriteBatch();
-        sTilesetChain.Present();
+        ExtractRenderData(sTilesetChain, ref sTilesetData);
     }
 
     private static void DrawMapBorders()
     {
         //Horizontal Top
         DrawTexture(
-            sWhiteTex, new RectangleF(0, 0, 1, 1), new RectangleF(0, CurrentView.Y - 1, CurrentView.Width, 3),
+            sWhiteTex, new SysRectangleF(0, 0, 1, 1), new SysRectangleF(0, CurrentView.Y - 1, CurrentView.Width, 3),
             System.Drawing.Color.DimGray
         );
 
         //Horizontal Buttom
         DrawTexture(
-            sWhiteTex, new RectangleF(0, 0, 1, 1),
-            new RectangleF(0, CurrentView.Y + Options.Instance.Map.TileHeight * Options.Instance.Map.MapHeight - 1, CurrentView.Width, 3),
+            sWhiteTex, new SysRectangleF(0, 0, 1, 1),
+            new SysRectangleF(0, CurrentView.Y + Options.Instance.Map.TileHeight * Options.Instance.Map.MapHeight - 1, CurrentView.Width, 3),
             System.Drawing.Color.DimGray
         );
 
         //Vertical Left
         DrawTexture(
-            sWhiteTex, new RectangleF(0, 0, 1, 1), new RectangleF(CurrentView.Left - 1, 0, 3, CurrentView.Height),
+            sWhiteTex, new SysRectangleF(0, 0, 1, 1), new SysRectangleF(CurrentView.Left - 1, 0, 3, CurrentView.Height),
             System.Drawing.Color.DimGray
         );
 
         //Vertical Right
         DrawTexture(
-            sWhiteTex, new RectangleF(0, 0, 1, 1),
-            new RectangleF(CurrentView.Left + Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth - 1, 0, 3, CurrentView.Height),
+            sWhiteTex, new SysRectangleF(0, 0, 1, 1),
+            new SysRectangleF(CurrentView.Left + Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth - 1, 0, 3, CurrentView.Height),
             System.Drawing.Color.DimGray
         );
 
         //Horizontal Top
         DrawTexture(
-            sWhiteTex, new RectangleF(0, 0, 1, 1),
-            new RectangleF(CurrentView.Left, CurrentView.Y - 1, Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth, 3),
+            sWhiteTex, new SysRectangleF(0, 0, 1, 1),
+            new SysRectangleF(CurrentView.Left, CurrentView.Y - 1, Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth, 3),
             System.Drawing.Color.DimGray
         );
 
         //Horizontal Buttom
         DrawTexture(
-            sWhiteTex, new RectangleF(0, 0, 1, 1),
-            new RectangleF(
+            sWhiteTex, new SysRectangleF(0, 0, 1, 1),
+            new SysRectangleF(
                 CurrentView.Left, CurrentView.Y + Options.Instance.Map.TileHeight * Options.Instance.Map.MapHeight - 1,
                 Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth, 3
             ), System.Drawing.Color.DimGray
@@ -1303,15 +1340,15 @@ public static partial class Graphics
 
         //Vertical Left
         DrawTexture(
-            sWhiteTex, new RectangleF(0, 0, 1, 1),
-            new RectangleF(CurrentView.Left - 1, CurrentView.Y, 3, Options.Instance.Map.MapHeight * Options.Instance.Map.TileHeight),
+            sWhiteTex, new SysRectangleF(0, 0, 1, 1),
+            new SysRectangleF(CurrentView.Left - 1, CurrentView.Y, 3, Options.Instance.Map.MapHeight * Options.Instance.Map.TileHeight),
             System.Drawing.Color.DimGray
         );
 
         //Vertical Right
         DrawTexture(
-            sWhiteTex, new RectangleF(0, 0, 1, 1),
-            new RectangleF(
+            sWhiteTex, new SysRectangleF(0, 0, 1, 1),
+            new SysRectangleF(
                 CurrentView.Left + Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth - 1, CurrentView.Y, 3,
                 Options.Instance.Map.MapHeight * Options.Instance.Map.TileHeight
             ), System.Drawing.Color.DimGray
@@ -1687,14 +1724,14 @@ public static partial class Graphics
     private static void DrawMapOverlay(RenderTarget2D target)
     {
         DrawTexture(
-            sWhiteTex, new RectangleF(0, 0, 1, 1), new RectangleF(0, 0, CurrentView.Width, CurrentView.Height),
+            sWhiteTex, new SysRectangleF(0, 0, 1, 1), new SysRectangleF(0, 0, CurrentView.Width, CurrentView.Height),
             System.Drawing.Color.FromArgb(
                 Globals.CurrentMap.AHue, Globals.CurrentMap.RHue, Globals.CurrentMap.GHue, Globals.CurrentMap.BHue
             ), target
         );
     }
 
-    public static Bitmap ScreenShotMap()
+    public static SysBitmap ScreenShotMap()
     {
         if (sScreenShotRenderTexture == null)
         {
@@ -1880,10 +1917,10 @@ public static partial class Graphics
             ), data, 0, sScreenShotRenderTexture.Width * sScreenShotRenderTexture.Height
         );
 
-        var bitmap = new Bitmap(sScreenShotRenderTexture.Width, sScreenShotRenderTexture.Height);
+        var bitmap = new SysBitmap(sScreenShotRenderTexture.Width, sScreenShotRenderTexture.Height);
         var bits = bitmap.LockBits(
             new System.Drawing.Rectangle(0, 0, bitmap.Width, bitmap.Height), ImageLockMode.ReadWrite,
-            PixelFormat.Format32bppArgb
+            SysPixelFormat.Format32bppArgb
         );
 
         unsafe
@@ -1955,8 +1992,8 @@ public static partial class Graphics
             for (var y = 0; y <= yCount; y++)
             {
                 DrawTexture(
-                    fogTex, new RectangleF(0, 0, fogTex.Width, fogTex.Height),
-                    new RectangleF(
+                    fogTex, new SysRectangleF(0, 0, fogTex.Width, fogTex.Height),
+                    new SysRectangleF(
                         0 - Options.Instance.Map.MapWidth * Options.Instance.Map.TileWidth * 1f + x * fogTex.Width + drawX,
                         0 - Options.Instance.Map.MapHeight * Options.Instance.Map.TileHeight * 1f + y * fogTex.Height + drawY, fogTex.Width,
                         fogTex.Height
@@ -1997,14 +2034,14 @@ public static partial class Graphics
             if (!tmpMap.IsIndoors)
             {
                 DrawTexture(
-                    sWhiteTex, new RectangleF(0, 0, 1, 1),
-                    new RectangleF(0, 0, DarknessTexture.Width, DarknessTexture.Height),
+                    sWhiteTex, new SysRectangleF(0, 0, 1, 1),
+                    new SysRectangleF(0, 0, DarknessTexture.Width, DarknessTexture.Height),
                     System.Drawing.Color.FromArgb(255, 255, 255, 255), DarknessTexture, BlendState.Additive
                 );
 
                 DrawTexture(
-                    sWhiteTex, new RectangleF(0, 0, 1, 1),
-                    new RectangleF(0, 0, DarknessTexture.Width, DarknessTexture.Height),
+                    sWhiteTex, new SysRectangleF(0, 0, 1, 1),
+                    new SysRectangleF(0, 0, DarknessTexture.Width, DarknessTexture.Height),
                     System.Drawing.Color.FromArgb(
                         gridLightColor.A, gridLightColor.R, gridLightColor.G, gridLightColor.B
                     ), DarknessTexture, BlendState.NonPremultiplied
@@ -2013,8 +2050,8 @@ public static partial class Graphics
             else
             {
                 DrawTexture(
-                    sWhiteTex, new RectangleF(0, 0, 1, 1),
-                    new RectangleF(0, 0, DarknessTexture.Width, DarknessTexture.Height),
+                    sWhiteTex, new SysRectangleF(0, 0, 1, 1),
+                    new SysRectangleF(0, 0, DarknessTexture.Width, DarknessTexture.Height),
                     System.Drawing.Color.FromArgb((byte) ((float) tmpMap.Brightness / 100f * 255f), 255, 255, 255),
                     DarknessTexture, BlendState.Additive
                 );
@@ -2025,44 +2062,44 @@ public static partial class Graphics
             if (!tmpMap.IsIndoors && LightColor != null)
             {
                 DrawTexture(
-                    sWhiteTex, new RectangleF(0, 0, 1, 1),
-                    new RectangleF(0, 0, DarknessTexture.Width, DarknessTexture.Height),
+                    sWhiteTex, new SysRectangleF(0, 0, 1, 1),
+                    new SysRectangleF(0, 0, DarknessTexture.Width, DarknessTexture.Height),
                     System.Drawing.Color.FromArgb(255, 255, 255, 255), DarknessTexture, BlendState.Additive
                 );
 
                 DrawTexture(
-                    sWhiteTex, new RectangleF(0, 0, 1, 1),
-                    new RectangleF(0, 0, DarknessTexture.Width, DarknessTexture.Height),
+                    sWhiteTex, new SysRectangleF(0, 0, 1, 1),
+                    new SysRectangleF(0, 0, DarknessTexture.Width, DarknessTexture.Height),
                     System.Drawing.Color.FromArgb(LightColor.A, LightColor.R, LightColor.G, LightColor.B),
                     DarknessTexture, BlendState.NonPremultiplied
                 );
 
                 DrawTexture(
-                    sWhiteTex, new RectangleF(0, 0, 1, 1), new RectangleF(0, 0, 32, 32),
+                    sWhiteTex, new SysRectangleF(0, 0, 1, 1), new SysRectangleF(0, 0, 32, 32),
                     System.Drawing.Color.FromArgb(255, 255, 0, 0), DarknessTexture, BlendState.NonPremultiplied
                 );
 
                 DrawTexture(
-                    sWhiteTex, new RectangleF(0, 0, 1, 1), new RectangleF(0, DarknessTexture.Height - 32, 32, 32),
+                    sWhiteTex, new SysRectangleF(0, 0, 1, 1), new SysRectangleF(0, DarknessTexture.Height - 32, 32, 32),
                     System.Drawing.Color.FromArgb(255, 255, 0, 0), DarknessTexture, BlendState.NonPremultiplied
                 );
 
                 DrawTexture(
-                    sWhiteTex, new RectangleF(0, 0, 1, 1), new RectangleF(DarknessTexture.Width - 32, 0, 32, 32),
+                    sWhiteTex, new SysRectangleF(0, 0, 1, 1), new SysRectangleF(DarknessTexture.Width - 32, 0, 32, 32),
                     System.Drawing.Color.FromArgb(255, 255, 0, 0), DarknessTexture, BlendState.NonPremultiplied
                 );
 
                 DrawTexture(
-                    sWhiteTex, new RectangleF(0, 0, 1, 1),
-                    new RectangleF(DarknessTexture.Width - 32, DarknessTexture.Height - 32, 32, 32),
+                    sWhiteTex, new SysRectangleF(0, 0, 1, 1),
+                    new SysRectangleF(DarknessTexture.Width - 32, DarknessTexture.Height - 32, 32, 32),
                     System.Drawing.Color.FromArgb(255, 255, 0, 0), DarknessTexture, BlendState.NonPremultiplied
                 );
             }
             else if (tmpMap.IsIndoors)
             {
                 DrawTexture(
-                    sWhiteTex, new RectangleF(0, 0, 1, 1),
-                    new RectangleF(0, 0, DarknessTexture.Width, DarknessTexture.Height),
+                    sWhiteTex, new SysRectangleF(0, 0, 1, 1),
+                    new SysRectangleF(0, 0, DarknessTexture.Width, DarknessTexture.Height),
                     System.Drawing.Color.FromArgb((byte) ((float) tmpMap.Brightness / 100f * 255f), 255, 255, 255),
                     DarknessTexture, BlendState.Additive
                 );
@@ -2070,8 +2107,8 @@ public static partial class Graphics
             else
             {
                 DrawTexture(
-                    sWhiteTex, new RectangleF(0, 0, 1, 1),
-                    new RectangleF(0, 0, DarknessTexture.Width, DarknessTexture.Height),
+                    sWhiteTex, new SysRectangleF(0, 0, 1, 1),
+                    new SysRectangleF(0, 0, DarknessTexture.Width, DarknessTexture.Height),
                     System.Drawing.Color.FromArgb(255, 255, 255, 255), DarknessTexture, BlendState.Additive
                 );
             }
@@ -2094,8 +2131,8 @@ public static partial class Graphics
         }
 
         DrawTexture(
-            DarknessTexture, new RectangleF(0, 0, DarknessTexture.Width, DarknessTexture.Height),
-            new RectangleF(
+            DarknessTexture, new SysRectangleF(0, 0, DarknessTexture.Width, DarknessTexture.Height),
+            new SysRectangleF(
                 CurrentView.Left - Options.Instance.Map.MapWidth * Options.Instance.Map.TileWidth,
                 CurrentView.Top - Options.Instance.Map.MapHeight * Options.Instance.Map.TileHeight, DarknessTexture.Width,
                 DarknessTexture.Height
@@ -2126,8 +2163,8 @@ public static partial class Graphics
                     if (lightTex != null)
                     {
                         DrawTexture(
-                            lightTex, new RectangleF(0, 0, lightTex.Width, lightTex.Height),
-                            new RectangleF(
+                            lightTex, new SysRectangleF(0, 0, lightTex.Width, lightTex.Height),
+                            new SysRectangleF(
                                 x * Options.Instance.Map.TileWidth + Options.Instance.Map.MapWidth * Options.Instance.Map.TileWidth * 0 + CurrentView.Left,
                                 y * Options.Instance.Map.TileHeight +
                                 Options.Instance.Map.MapHeight * Options.Instance.Map.TileHeight * 0 +
@@ -2170,7 +2207,7 @@ public static partial class Graphics
         y -= light.Size;
         x -= light.Size;
         DrawTexture(
-            sWhiteTex, new RectangleF(0, 0, 1, 1), new RectangleF(x, y, light.Size * 2, light.Size * 2),
+            sWhiteTex, new SysRectangleF(0, 0, 1, 1), new SysRectangleF(x, y, light.Size * 2, light.Size * 2),
             System.Drawing.Color.White, target, BlendState.Additive, shader
         );
     }
@@ -2193,8 +2230,8 @@ public static partial class Graphics
     //Rendering Functions
     public static void DrawTexture(Texture2D tex, float x, float y, RenderTarget2D renderTarget2D)
     {
-        var destRectangle = new RectangleF(x, y, (int) tex.Width, (int) tex.Height);
-        var srcRectangle = new RectangleF(0, 0, (int) tex.Width, (int) tex.Height);
+        var destRectangle = new SysRectangleF(x, y, (int) tex.Width, (int) tex.Height);
+        var srcRectangle = new SysRectangleF(0, 0, (int) tex.Width, (int) tex.Height);
         DrawTexture(tex, srcRectangle, destRectangle, renderTarget2D);
     }
 
@@ -2206,8 +2243,8 @@ public static partial class Graphics
         BlendState blendMode
     )
     {
-        var destRectangle = new RectangleF(x, y, (int)tex.Width, (int)tex.Height);
-        var srcRectangle = new RectangleF(0, 0, (int)tex.Width, (int)tex.Height);
+        var destRectangle = new SysRectangleF(x, y, (int)tex.Width, (int)tex.Height);
+        var srcRectangle = new SysRectangleF(0, 0, (int)tex.Width, (int)tex.Height);
         DrawTexture(tex, srcRectangle, destRectangle, System.Drawing.Color.White, renderTarget2D, blendMode);
     }
 
@@ -2222,15 +2259,15 @@ public static partial class Graphics
         RenderTarget2D renderTarget2D
     )
     {
-        var destRectangle = new RectangleF(dx, dy, w, h);
-        var srcRectangle = new RectangleF(sx, sy, w, h);
+        var destRectangle = new SysRectangleF(dx, dy, w, h);
+        var srcRectangle = new SysRectangleF(sx, sy, w, h);
         DrawTexture(tex, srcRectangle, destRectangle, renderTarget2D);
     }
 
     public static void DrawTexture(
         Texture2D tex,
-        RectangleF srcRectangle,
-        RectangleF targetRect,
+        SysRectangleF srcRectangle,
+        SysRectangleF targetRect,
         RenderTarget2D renderTarget2D
     )
     {
@@ -2250,8 +2287,8 @@ public static partial class Graphics
         float rotationDegrees = 0
     ) => DrawTexture(
         texture,
-        new RectangleF(source.X, source.Y, source.Width, source.Height),
-        new RectangleF(destination.X, destination.Y, destination.Width, destination.Height),
+        new SysRectangleF(source.X, source.Y, source.Width, source.Height),
+        new SysRectangleF(destination.X, destination.Y, destination.Width, destination.Height),
         System.Drawing.Color.FromArgb(renderColor.ToArgb()),
         renderTarget,
         blendMode,
@@ -2261,8 +2298,8 @@ public static partial class Graphics
 
     public static void DrawTexture(
         Texture2D texture,
-        RectangleF source,
-        RectangleF destination,
+        SysRectangleF source,
+        SysRectangleF destination,
         Color renderColor,
         RenderTarget2D renderTarget = null,
         BlendState blendMode = null,
@@ -2281,8 +2318,8 @@ public static partial class Graphics
 
     public static void DrawTexture(
         Texture2D tex,
-        RectangleF srcRectangle,
-        RectangleF targetRect,
+        SysRectangleF srcRectangle,
+        SysRectangleF targetRect,
         System.Drawing.Color renderColor,
         RenderTarget2D renderTarget = null,
         BlendState blendMode = null,
@@ -2385,6 +2422,331 @@ public static partial class Graphics
 
         sSpriteBatch.End();
         sSpriteBatchBegan = false;
+    }
+
+    /// <summary>
+    /// Extract pixel data from a render target for display in Eto.Forms
+    /// </summary>
+    private static void ExtractRenderData(RenderTarget2D renderTarget, ref int[] data)
+    {
+        if (renderTarget == null || renderTarget.IsDisposed)
+        {
+            return;
+        }
+
+        var size = renderTarget.Width * renderTarget.Height;
+        if (data == null || data.Length != size)
+        {
+            data = new int[size];
+        }
+
+        try
+        {
+            renderTarget.GetData(0, new Microsoft.Xna.Framework.Rectangle(0, 0, renderTarget.Width, renderTarget.Height),
+                data, 0, size);
+        }
+        catch
+        {
+            // Ignore extraction errors
+        }
+    }
+
+    /// <summary>
+    /// Create a new render target for the map editor display
+    /// </summary>
+    public static RenderTarget2D CreateMapEditorTarget(int width, int height)
+    {
+        if (sGraphicsDevice == null || width <= 0 || height <= 0)
+        {
+            return null;
+        }
+
+        sMapEditorChain?.Dispose();
+        sMapEditorChain = new RenderTarget2D(
+            sGraphicsDevice, width, height, false, SurfaceFormat.Color, DepthFormat.Depth24, 0,
+            RenderTargetUsage.DiscardContents
+        );
+        return sMapEditorChain;
+    }
+
+    /// <summary>
+    /// Create a new render target for the map grid display
+    /// </summary>
+    public static RenderTarget2D CreateMapGridTarget(int width, int height)
+    {
+        if (sGraphicsDevice == null || width <= 0 || height <= 0)
+        {
+            return null;
+        }
+
+        sMapGridChain?.Dispose();
+        sMapGridChain = new RenderTarget2D(
+            sGraphicsDevice, width, height, false, SurfaceFormat.Color, DepthFormat.Depth24, 0,
+            RenderTargetUsage.DiscardContents
+        );
+        return sMapGridChain;
+    }
+
+    /// <summary>
+    /// Create a new render target for the tileset display
+    /// </summary>
+    public static RenderTarget2D CreateTilesetTarget(int width, int height)
+    {
+        if (sGraphicsDevice == null || width <= 0 || height <= 0)
+        {
+            return null;
+        }
+
+        sTilesetChain?.Dispose();
+        sTilesetChain = new RenderTarget2D(
+            sGraphicsDevice, width, height, false, SurfaceFormat.Color, DepthFormat.Depth24, 0,
+            RenderTargetUsage.DiscardContents
+        );
+        return sTilesetChain;
+    }
+
+    /// <summary>
+    /// Linear interpolation between two colors
+    /// </summary>
+    private static System.Drawing.Color ColorInterpolate(System.Drawing.Color c1, System.Drawing.Color c2, float ratio)
+    {
+        var r = (byte)(c1.R + (c2.R - c1.R) * ratio);
+        var g = (byte)(c1.G + (c2.G - c1.G) * ratio);
+        var b = (byte)(c1.B + (c2.B - c1.B) * ratio);
+        var a = (byte)(c1.A + (c2.A - c1.A) * ratio);
+        return System.Drawing.Color.FromArgb(a, r, g, b);
+    }
+
+    /// <summary>
+    /// Load a tileset as an Eto.Forms Bitmap for cross-platform rendering
+    /// </summary>
+    private static int sTilesetLoadCount = 0;
+    private static Dictionary<string, string>? sTilesetFileCache;
+
+    public static Eto.Drawing.Bitmap? LoadTilesetBitmap(string tilesetName)
+    {
+        if (sTilesetBitmaps.TryGetValue(tilesetName, out var cached))
+        {
+            return cached;
+        }
+
+        try
+        {
+            // Build a case-insensitive cache of tileset files on first access
+            if (sTilesetFileCache == null)
+            {
+                sTilesetFileCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var tilesetDirs = new[]
+                {
+                    Path.Combine("resources", "tilesets"),
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "resources", "tilesets"),
+                };
+
+                foreach (var dir in tilesetDirs)
+                {
+                    if (Directory.Exists(dir))
+                    {
+                        foreach (var file in Directory.GetFiles(dir))
+                        {
+                            var fileName = Path.GetFileName(file);
+                            if (!sTilesetFileCache.ContainsKey(fileName))
+                            {
+                                sTilesetFileCache[fileName] = file;
+                            }
+                        }
+                    }
+                }
+
+                Console.WriteLine($"Found {sTilesetFileCache.Count} tileset files");
+            }
+
+            // Case-insensitive lookup
+            if (sTilesetFileCache.TryGetValue(tilesetName, out var filePath))
+            {
+                var bmp = new Eto.Drawing.Bitmap(filePath);
+                sTilesetBitmaps[tilesetName] = bmp;
+                sTilesetLoadCount++;
+                if (sTilesetLoadCount <= 3)
+                {
+                    Console.WriteLine($"Loaded tileset: {tilesetName}");
+                }
+                return bmp;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to load tileset {tilesetName}: {ex.Message}");
+        }
+
+        sTilesetBitmaps[tilesetName] = null;
+        return null;
+    }
+
+    /// <summary>
+    /// Mark the map as needing redraw
+    /// </summary>
+    public static void InvalidateMap()
+    {
+        sMapNeedsRedraw = true;
+    }
+
+    /// <summary>
+    /// Render the current map to a bitmap using Eto.Forms drawing
+    /// </summary>
+    public static Eto.Drawing.Bitmap? RenderMapToBitmap()
+    {
+        if (Globals.CurrentMap == null)
+            return null;
+
+        lock (sRenderLock)
+        {
+            if (!sMapNeedsRedraw && sRenderedMapBitmap != null)
+                return sRenderedMapBitmap;
+
+            try
+            {
+                var tileWidth = Options.Instance.Map.TileWidth;
+                var tileHeight = Options.Instance.Map.TileHeight;
+                var mapWidth = Options.Instance.Map.MapWidth;
+                var mapHeight = Options.Instance.Map.MapHeight;
+                var totalWidth = (mapWidth + 2) * tileWidth;
+                var totalHeight = (mapHeight + 2) * tileHeight;
+
+                var mapBitmap = new Eto.Drawing.Bitmap(totalWidth, totalHeight, Eto.Drawing.PixelFormat.Format32bppRgba);
+
+                using (var graphics = new Eto.Drawing.Graphics(mapBitmap))
+                {
+                    graphics.Clear(Colors.Black);
+
+                    var offsetX = tileWidth; // Offset by one tile for border
+                    var offsetY = tileHeight;
+
+                    // Draw all layers
+                    foreach (var layer in Options.Instance.Map.Layers.All)
+                    {
+                        for (var x = 0; x < mapWidth; x++)
+                        {
+                            for (var y = 0; y < mapHeight; y++)
+                            {
+                                var tile = Globals.CurrentMap.Layers[layer][x, y];
+                                if (tile.TilesetId == Guid.Empty)
+                                    continue;
+
+                                var tilesetName = TilesetDescriptor.GetName(tile.TilesetId);
+                                if (string.IsNullOrEmpty(tilesetName))
+                                    continue;
+
+                                var tilesetBmp = LoadTilesetBitmap(tilesetName);
+                                if (tilesetBmp == null)
+                                    continue;
+
+                                var dstX = offsetX + x * tileWidth;
+                                var dstY = offsetY + y * tileHeight;
+
+                                // Check if this is an autotile
+                                if (tile.Autotile > 0 && Globals.CurrentMap.Autotiles?.Layers != null)
+                                {
+                                    if (Globals.CurrentMap.Autotiles.Layers.TryGetValue(layer, out var layerAutotiles))
+                                    {
+                                        var autotile = layerAutotiles[x, y];
+                                        if (autotile?.RenderState == 2) // RENDER_STATE_AUTOTILE
+                                        {
+                                            // Draw 4 quarter tiles
+                                            var halfW = tileWidth / 2;
+                                            var halfH = tileHeight / 2;
+                                            for (int q = 1; q <= 4; q++)
+                                            {
+                                                var qx = autotile.QuarterTile[q].X;
+                                                var qy = autotile.QuarterTile[q].Y;
+                                                var srcQ = new Eto.Drawing.Rectangle(qx, qy, halfW, halfH);
+                                                var dstQ = new Eto.Drawing.Rectangle(
+                                                    dstX + ((q - 1) % 2) * halfW,
+                                                    dstY + ((q - 1) / 2) * halfH,
+                                                    halfW, halfH
+                                                );
+                                                try { graphics.DrawImage(tilesetBmp, srcQ, dstQ); } catch { }
+                                            }
+                                            continue;
+                                        }
+                                    }
+                                }
+
+                                // Normal tile drawing
+                                var srcRect = new Eto.Drawing.Rectangle(
+                                    tile.X * tileWidth,
+                                    tile.Y * tileHeight,
+                                    tileWidth,
+                                    tileHeight
+                                );
+                                var dstRect = new Eto.Drawing.Rectangle(dstX, dstY, tileWidth, tileHeight);
+
+                                try
+                                {
+                                    graphics.DrawImage(tilesetBmp, srcRect, dstRect);
+                                }
+                                catch
+                                {
+                                    // Skip tiles that can't be drawn
+                                }
+                            }
+                        }
+                    }
+
+                    // Draw grid overlay if enabled
+                    if (!HideGrid)
+                    {
+                        var gridPen = new Eto.Drawing.Pen(Colors.DarkGray, 1);
+                        for (var x = 0; x <= mapWidth; x++)
+                        {
+                            graphics.DrawLine(gridPen, offsetX + x * tileWidth, offsetY, offsetX + x * tileWidth, offsetY + mapHeight * tileHeight);
+                        }
+                        for (var y = 0; y <= mapHeight; y++)
+                        {
+                            graphics.DrawLine(gridPen, offsetX, offsetY + y * tileHeight, offsetX + mapWidth * tileWidth, offsetY + y * tileHeight);
+                        }
+                    }
+
+                    // Draw selection rectangle
+                    if (Globals.CurMapSelW != 0 || Globals.CurMapSelH != 0)
+                    {
+                        var selX = offsetX + Globals.CurMapSelX * tileWidth;
+                        var selY = offsetY + Globals.CurMapSelY * tileHeight;
+                        var selW = (Globals.CurMapSelW + 1) * tileWidth;
+                        var selH = (Globals.CurMapSelH + 1) * tileHeight;
+                        var selPen = new Eto.Drawing.Pen(Colors.Yellow, 2);
+                        graphics.DrawRectangle(selPen, selX, selY, selW, selH);
+                    }
+
+                    // Draw current tile cursor
+                    var cursorX = offsetX + Globals.CurTileX * tileWidth;
+                    var cursorY = offsetY + Globals.CurTileY * tileHeight;
+                    var cursorPen = new Eto.Drawing.Pen(Colors.White, 2);
+                    graphics.DrawRectangle(cursorPen, cursorX, cursorY, tileWidth, tileHeight);
+                }
+
+                sRenderedMapBitmap?.Dispose();
+                sRenderedMapBitmap = mapBitmap;
+                sMapNeedsRedraw = false;
+
+                return mapBitmap;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Clear the tileset bitmap cache
+    /// </summary>
+    public static void ClearTilesetCache()
+    {
+        foreach (var bmp in sTilesetBitmaps.Values)
+        {
+            bmp?.Dispose();
+        }
+        sTilesetBitmaps.Clear();
     }
 
 }

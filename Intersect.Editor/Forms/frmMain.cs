@@ -1,11 +1,7 @@
+using System.ComponentModel;
 using System.Diagnostics;
-using System.Globalization;
-using System.Security.Cryptography;
-using DarkUI.Controls;
-using DarkUI.Forms;
-using Intersect.Compression;
-using Intersect.Config;
-using Intersect.Editor.Classes.ContentManagement;
+using Eto.Forms;
+using Eto.Drawing;
 using Intersect.Editor.Content;
 using Intersect.Editor.Core;
 using Intersect.Editor.Forms.DockingElements;
@@ -16,2400 +12,885 @@ using Intersect.Editor.Localization;
 using Intersect.Editor.Maps;
 using Intersect.Editor.Networking;
 using Intersect.Enums;
-using Intersect.Framework.Core.AssetManagement;
 using Intersect.GameObjects;
-using Intersect.Localization;
-using Intersect.Network;
 using Intersect.Utilities;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
-using WeifenLuo.WinFormsUI.Docking;
 
 namespace Intersect.Editor.Forms;
 
-
-public partial class FrmMain : Form
+public class FrmMain : Form
 {
-
+    // Delegate types
     public delegate void HandleDisconnect();
-
-    //Cross Thread Delegates
     public delegate void TryOpenEditor(GameObjectType type);
-
     public delegate void UpdateTimeList();
 
     public HandleDisconnect DisconnectDelegate;
-
     public TryOpenEditor EditorDelegate;
-
-    //Editor References
-    private FrmAnimation mAnimationEditor;
-
-    private FrmClass mClassEditor;
-
-    private FrmCommonEvent mCommonEventEditor;
-
-    private FrmCraftingTables mCraftingTablesEditor;
-
-    private FrmCrafts mCraftsEditor;
-
-    private FrmItem mItemEditor;
-
-    private FrmNpc mNpcEditor;
-
-    private FrmProjectile mProjectileEditor;
-
-    private FrmQuest mQuestEditor;
-
-    private FrmResource mResourceEditor;
-
-    private FrmShop mShopEditor;
-
-    private FrmSpell mSpellEditor;
-
-    private FrmSwitchVariable mSwitchVariableEditor;
-
-    private FrmTime mTimeEditor;
-
-    //General Editting Variables
-    bool mTMouseDown;
-
     public UpdateTimeList TimeDelegate;
 
-    //Initialization & Setup Functions
+    // Editor references
+    private dynamic mAnimationEditor;
+    private dynamic mClassEditor;
+    private dynamic mCommonEventEditor;
+    private dynamic mCraftingTablesEditor;
+    private dynamic mCraftsEditor;
+    private dynamic mItemEditor;
+    private dynamic mNpcEditor;
+    private dynamic mProjectileEditor;
+    private dynamic mQuestEditor;
+    private dynamic mResourceEditor;
+    private dynamic mShopEditor;
+    private dynamic mSpellEditor;
+    private dynamic mSwitchVariableEditor;
+    private dynamic mTimeEditor;
+
+    // Menu items that need to be toggled
+    private CheckMenuItem hideDarknessMenuItem;
+    private CheckMenuItem hideFogMenuItem;
+    private CheckMenuItem hideOverlayMenuItem;
+    private CheckMenuItem hideTilePreviewMenuItem;
+    private CheckMenuItem hideResourcesMenuItem;
+    private CheckMenuItem hideEventsMenuItem;
+    private CheckMenuItem mapGridMenuItem;
+    private ButtonMenuItem undoMenuItem;
+    private ButtonMenuItem redoMenuItem;
+    private ButtonMenuItem cutMenuItem;
+    private ButtonMenuItem copyMenuItem;
+    private ButtonMenuItem pasteMenuItem;
+    private ButtonMenuItem fillMenuItem;
+    private ButtonMenuItem eraseLayerMenuItem;
+    private CheckMenuItem allLayersMenuItem;
+    private CheckMenuItem currentLayerOnlyMenuItem;
+
+    // Toolbar buttons (as regular Buttons in a toolbar layout)
+    private Button btnNewMap;
+    private Button btnSaveMap;
+    private Button btnCut;
+    private Button btnCopy;
+    private Button btnPaste;
+    private Button btnUndo;
+    private Button btnRedo;
+    private Button btnBrush;
+    private Button btnSelect;
+    private Button btnRect;
+    private Button btnFlipVertical;
+    private Button btnFlipHorizontal;
+    private Button btnFill;
+    private Button btnErase;
+    private Button btnDropper;
+    private Button btnScreenshot;
+    private Button btnRun;
+    private Button btnTime;
+    private Button btnBug;
+    private Button btnQuestion;
+
+    // Status bar labels
+    private Label lblCoords;
+    private Label lblRevision;
+    private Label lblFPS;
+    private Label lblDebug;
+
+    // Content area
+    private TabControl contentTabs;
+    private Drawable mapEditorDrawable;
+    private Drawable mapGridDrawable;
+    private Scrollable mapEditorScrollable;
+
+    // Side panels
+    private TabControl sideTabControl;
+
+    // Layers tab controls
+    private TabPage layersTab;
+    private TabPage mapListTab;
+    private TabPage mapPropertiesTab;
+
     public FrmMain()
     {
-        InitializeComponent();
-        Icon = Program.Icon;
+        Console.WriteLine("FrmMain constructor starting");
+        Title = "Intersect Editor";
+        MinimumSize = new Size(1024, 768);
+        Size = new Size(1280, 800);
+        WindowState = WindowState.Maximized;
 
-        dockLeft.Theme = new VS2015DarkTheme();
+        InitializeComponents();
+        SetupMenus();
+        SetupToolbar();
+        SetupStatusBar();
+        SetupLayout();
+        Console.WriteLine("FrmMain constructor completed");
+
+        // Initialize delegates
+        DisconnectDelegate = HandleServerDisconnect;
+        EditorDelegate = TryOpenEditorMethod;
+        TimeDelegate = UpdateTimeSimulationList;
+
+        // Set up global delegate for editor opening
+        Globals.OpenEditorDelegate = TryOpenEditorMethod;
+
+        // Save login preferences
+        Globals.LoginForm?.TryRemembering();
+    }
+
+    private void InitializeComponents()
+    {
+        Console.WriteLine("FrmMain.InitializeComponents() starting");
+        // Initialize docking windows
         Globals.MapListWindow = new FrmMapList();
         Globals.MapLayersWindow = new FrmMapLayers();
         Globals.MapGridWindowNew = new FrmMapGrid();
         Globals.MapEditorWindow = new FrmMapEditor();
-
-        Globals.MapListWindow.Show(dockLeft, DockState.DockRight);
-        Globals.MapLayersWindow.Show(dockLeft, DockState.DockLeft);
-        Globals.MapGridWindowNew.Show(dockLeft, DockState.Document);
-        Globals.MapEditorWindow.Show(dockLeft, DockState.Document);
+        Console.WriteLine("FrmMain.InitializeComponents() completed");
     }
 
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern IntPtr WindowFromPoint(System.Drawing.Point pnt);
-
-    private void frmMain_Load(object sender, EventArgs e)
+    private void SetupMenus()
     {
-        //Init Delegates
-        EditorDelegate = TryOpenEditorMethod;
-        DisconnectDelegate = HandleServerDisconnect;
-        TimeDelegate = UpdateTimeSimulationList;
+        var menuBar = new MenuBar();
 
-        // Initilise the editor.
-        InitEditor();
+        // File menu
+        var fileMenu = new SubMenuItem { Text = Strings.MainForm.file };
+        var saveMapItem = new ButtonMenuItem { Text = Strings.MainForm.SaveMap };
+        saveMapItem.Click += (s, e) => SaveMapMenuItem_Click();
+        var newMapItem = new ButtonMenuItem { Text = Strings.MainForm.newmap };
+        newMapItem.Click += (s, e) => NewMapMenuItem_Click();
+        var optionsItem = new ButtonMenuItem { Text = Strings.MainForm.options };
+        optionsItem.Click += (s, e) => OptionsMenuItem_Click();
+        var exitItem = new ButtonMenuItem { Text = Strings.MainForm.exit };
+        exitItem.Click += (s, e) => Application.Instance.Quit();
+        fileMenu.Items.Add(saveMapItem);
+        fileMenu.Items.Add(newMapItem);
+        fileMenu.Items.Add(new SeparatorMenuItem());
+        fileMenu.Items.Add(optionsItem);
+        fileMenu.Items.Add(new SeparatorMenuItem());
+        fileMenu.Items.Add(exitItem);
 
-        //Init Map Properties
-        InitMapProperties();
-        InitLocalization();
-        InitExternalTools();
-        Show();
+        // Edit menu
+        var editMenu = new SubMenuItem { Text = Strings.MainForm.edit };
+        undoMenuItem = new ButtonMenuItem { Text = Strings.MainForm.Undo, Enabled = false };
+        undoMenuItem.Click += (s, e) => Undo();
+        redoMenuItem = new ButtonMenuItem { Text = Strings.MainForm.Redo, Enabled = false };
+        redoMenuItem.Click += (s, e) => Redo();
+        cutMenuItem = new ButtonMenuItem { Text = Strings.MainForm.Cut, Enabled = false };
+        cutMenuItem.Click += (s, e) => Cut();
+        copyMenuItem = new ButtonMenuItem { Text = Strings.MainForm.Copy, Enabled = false };
+        copyMenuItem.Click += (s, e) => Copy();
+        pasteMenuItem = new ButtonMenuItem { Text = Strings.MainForm.Paste, Enabled = false };
+        pasteMenuItem.Click += (s, e) => Paste();
+        fillMenuItem = new ButtonMenuItem { Text = Strings.MainForm.Fill };
+        fillMenuItem.Click += (s, e) => Fill();
+        eraseLayerMenuItem = new ButtonMenuItem { Text = Strings.MainForm.Erase };
+        eraseLayerMenuItem.Click += (s, e) => EraseLayer();
 
-        //Init Forms with RenderTargets
-        Globals.MapEditorWindow.InitMapEditor();
-        Globals.MapLayersWindow.InitMapLayers();
-        Globals.MapGridWindowNew.InitGridWindow();
-        UpdateTimeSimulationList();
+        var selectMenu = new SubMenuItem { Text = Strings.MainForm.selectlayers };
+        allLayersMenuItem = new CheckMenuItem { Text = Strings.MainForm.alllayers, Checked = true };
+        allLayersMenuItem.Click += (s, e) => { Globals.SelectionType = (int)SelectionTypes.AllLayers; allLayersMenuItem.Checked = true; currentLayerOnlyMenuItem.Checked = false; };
+        currentLayerOnlyMenuItem = new CheckMenuItem { Text = Strings.MainForm.currentonly };
+        currentLayerOnlyMenuItem.Click += (s, e) => { Globals.SelectionType = (int)SelectionTypes.CurrentLayer; allLayersMenuItem.Checked = false; currentLayerOnlyMenuItem.Checked = true; };
+        selectMenu.Items.Add(allLayersMenuItem);
+        selectMenu.Items.Add(currentLayerOnlyMenuItem);
 
-        WindowState = FormWindowState.Maximized;
+        editMenu.Items.Add(undoMenuItem);
+        editMenu.Items.Add(redoMenuItem);
+        editMenu.Items.Add(new SeparatorMenuItem());
+        editMenu.Items.Add(cutMenuItem);
+        editMenu.Items.Add(copyMenuItem);
+        editMenu.Items.Add(pasteMenuItem);
+        editMenu.Items.Add(new SeparatorMenuItem());
+        editMenu.Items.Add(fillMenuItem);
+        editMenu.Items.Add(eraseLayerMenuItem);
+        editMenu.Items.Add(selectMenu);
+
+        // View menu
+        var viewMenu = new SubMenuItem { Text = Strings.MainForm.view };
+        hideDarknessMenuItem = new CheckMenuItem { Text = Strings.MainForm.darkness, Checked = true };
+        hideDarknessMenuItem.Click += (s, e) => { Core.Graphics.HideDarkness = !Core.Graphics.HideDarkness; hideDarknessMenuItem.Checked = !Core.Graphics.HideDarkness; };
+        hideFogMenuItem = new CheckMenuItem { Text = Strings.MainForm.fog, Checked = true };
+        hideFogMenuItem.Click += (s, e) => { Core.Graphics.HideFog = !Core.Graphics.HideFog; hideFogMenuItem.Checked = !Core.Graphics.HideFog; };
+        hideOverlayMenuItem = new CheckMenuItem { Text = Strings.MainForm.overlay, Checked = true };
+        hideOverlayMenuItem.Click += (s, e) => { Core.Graphics.HideOverlay = !Core.Graphics.HideOverlay; hideOverlayMenuItem.Checked = !Core.Graphics.HideOverlay; };
+        hideTilePreviewMenuItem = new CheckMenuItem { Text = Strings.MainForm.tilepreview, Checked = true };
+        hideTilePreviewMenuItem.Click += (s, e) => { Core.Graphics.HideTilePreview = !Core.Graphics.HideTilePreview; hideTilePreviewMenuItem.Checked = !Core.Graphics.HideTilePreview; };
+        hideResourcesMenuItem = new CheckMenuItem { Text = Strings.MainForm.resources, Checked = true };
+        hideResourcesMenuItem.Click += (s, e) => { Core.Graphics.HideResources = !Core.Graphics.HideResources; hideResourcesMenuItem.Checked = !Core.Graphics.HideResources; };
+        hideEventsMenuItem = new CheckMenuItem { Text = Strings.MainForm.Events, Checked = true };
+        hideEventsMenuItem.Click += (s, e) => { Core.Graphics.HideEvents = !Core.Graphics.HideEvents; hideEventsMenuItem.Checked = !Core.Graphics.HideEvents; };
+        mapGridMenuItem = new CheckMenuItem { Text = Strings.MainForm.grid };
+        mapGridMenuItem.Click += (s, e) => { Core.Graphics.HideGrid = !Core.Graphics.HideGrid; mapGridMenuItem.Checked = !Core.Graphics.HideGrid; };
+
+        viewMenu.Items.Add(hideDarknessMenuItem);
+        viewMenu.Items.Add(hideFogMenuItem);
+        viewMenu.Items.Add(hideOverlayMenuItem);
+        viewMenu.Items.Add(hideTilePreviewMenuItem);
+        viewMenu.Items.Add(hideResourcesMenuItem);
+        viewMenu.Items.Add(hideEventsMenuItem);
+        viewMenu.Items.Add(mapGridMenuItem);
+
+        // Content Editors menu
+        var editorsMenu = new SubMenuItem { Text = Strings.MainForm.editors };
+        var animItem = new ButtonMenuItem { Text = Strings.MainForm.animationeditor };
+        animItem.Click += (s, e) => PacketSender.SendOpenEditor(GameObjectType.Animation);
+        var classItem = new ButtonMenuItem { Text = Strings.MainForm.classeditor };
+        classItem.Click += (s, e) => PacketSender.SendOpenEditor(GameObjectType.Class);
+        var commonEventItem = new ButtonMenuItem { Text = Strings.MainForm.commoneventeditor };
+        commonEventItem.Click += (s, e) => PacketSender.SendOpenEditor(GameObjectType.Event);
+        var craftTableItem = new ButtonMenuItem { Text = Strings.MainForm.craftingtableeditor };
+        craftTableItem.Click += (s, e) => PacketSender.SendOpenEditor(GameObjectType.CraftTables);
+        var craftItem = new ButtonMenuItem { Text = Strings.MainForm.craftingeditor };
+        craftItem.Click += (s, e) => PacketSender.SendOpenEditor(GameObjectType.Crafts);
+        var itemItem = new ButtonMenuItem { Text = Strings.MainForm.itemeditor };
+        itemItem.Click += (s, e) => PacketSender.SendOpenEditor(GameObjectType.Item);
+        var npcItem = new ButtonMenuItem { Text = Strings.MainForm.npceditor };
+        npcItem.Click += (s, e) => PacketSender.SendOpenEditor(GameObjectType.Npc);
+        var projItem = new ButtonMenuItem { Text = Strings.MainForm.projectileeditor };
+        projItem.Click += (s, e) => PacketSender.SendOpenEditor(GameObjectType.Projectile);
+        var questItem = new ButtonMenuItem { Text = Strings.MainForm.questeditor };
+        questItem.Click += (s, e) => PacketSender.SendOpenEditor(GameObjectType.Quest);
+        var resourceItem = new ButtonMenuItem { Text = Strings.MainForm.resourceeditor };
+        resourceItem.Click += (s, e) => PacketSender.SendOpenEditor(GameObjectType.Resource);
+        var shopItem = new ButtonMenuItem { Text = Strings.MainForm.shopeditor };
+        shopItem.Click += (s, e) => PacketSender.SendOpenEditor(GameObjectType.Shop);
+        var spellItem = new ButtonMenuItem { Text = Strings.MainForm.spelleditor };
+        spellItem.Click += (s, e) => PacketSender.SendOpenEditor(GameObjectType.Spell);
+        var varItem = new ButtonMenuItem { Text = Strings.MainForm.variableeditor };
+        varItem.Click += (s, e) => PacketSender.SendOpenEditor(GameObjectType.PlayerVariable);
+        var timeItem = new ButtonMenuItem { Text = Strings.MainForm.timeeditor };
+        timeItem.Click += (s, e) => PacketSender.SendOpenEditor(GameObjectType.Time);
+
+        editorsMenu.Items.Add(animItem);
+        editorsMenu.Items.Add(classItem);
+        editorsMenu.Items.Add(commonEventItem);
+        editorsMenu.Items.Add(craftTableItem);
+        editorsMenu.Items.Add(craftItem);
+        editorsMenu.Items.Add(itemItem);
+        editorsMenu.Items.Add(npcItem);
+        editorsMenu.Items.Add(projItem);
+        editorsMenu.Items.Add(questItem);
+        editorsMenu.Items.Add(resourceItem);
+        editorsMenu.Items.Add(shopItem);
+        editorsMenu.Items.Add(spellItem);
+        editorsMenu.Items.Add(varItem);
+        editorsMenu.Items.Add(timeItem);
+
+        // Help menu
+        var helpMenu = new SubMenuItem { Text = Strings.MainForm.help };
+        var questionItem = new ButtonMenuItem { Text = Strings.MainForm.postquestion };
+        questionItem.Click += (s, e) => BrowserUtils.Open("https://www.ascensiongamedev.com/community/forum/53-questions-and-answers/");
+        var bugItem = new ButtonMenuItem { Text = Strings.MainForm.reportbug };
+        bugItem.Click += (s, e) => BrowserUtils.Open("https://github.com/AscensionGameDev/Intersect-Engine/issues/new/choose");
+        var aboutItem = new ButtonMenuItem { Text = Strings.MainForm.about };
+        aboutItem.Click += (s, e) => { var about = new FrmAbout(); about.Show(); };
+        helpMenu.Items.Add(questionItem);
+        helpMenu.Items.Add(bugItem);
+        helpMenu.Items.Add(new SeparatorMenuItem());
+        helpMenu.Items.Add(aboutItem);
+
+        menuBar.Items.Add(fileMenu);
+        menuBar.Items.Add(editMenu);
+        menuBar.Items.Add(viewMenu);
+        menuBar.Items.Add(editorsMenu);
+        menuBar.Items.Add(helpMenu);
+
+        Menu = menuBar;
     }
 
-    private void InitLocalization()
+    private void SetupToolbar()
     {
-        InitLocalizationMenus();
-        InitLocalizationToolstrip();
+        // Toolbar will be created as buttons in the layout
+        btnNewMap = new Button { Text = "New" };
+        btnNewMap.Click += (s, e) => NewMapMenuItem_Click();
+        btnSaveMap = new Button { Text = "Save" };
+        btnSaveMap.Click += (s, e) => SaveMapMenuItem_Click();
+        btnCut = new Button { Text = "Cut", Enabled = false };
+        btnCut.Click += (s, e) => Cut();
+        btnCopy = new Button { Text = "Copy", Enabled = false };
+        btnCopy.Click += (s, e) => Copy();
+        btnPaste = new Button { Text = "Paste", Enabled = false };
+        btnPaste.Click += (s, e) => Paste();
+        btnUndo = new Button { Text = "Undo", Enabled = false };
+        btnUndo.Click += (s, e) => Undo();
+        btnRedo = new Button { Text = "Redo", Enabled = false };
+        btnRedo.Click += (s, e) => Redo();
+        btnBrush = new Button { Text = "Brush" };
+        btnBrush.Click += (s, e) => Globals.CurrentTool = EditingTool.Brush;
+        btnSelect = new Button { Text = "Select" };
+        btnSelect.Click += (s, e) => { Globals.CurrentTool = EditingTool.Selection; Globals.CurMapSelX = 0; Globals.CurMapSelY = 0; Globals.CurMapSelW = 0; Globals.CurMapSelH = 0; };
+        btnRect = new Button { Text = "Rect" };
+        btnRect.Click += (s, e) => { Globals.CurrentTool = EditingTool.Rectangle; Globals.CurMapSelX = 0; Globals.CurMapSelY = 0; Globals.CurMapSelW = 0; Globals.CurMapSelH = 0; };
+        btnFlipVertical = new Button { Text = "Flip V" };
+        btnFlipVertical.Click += (s, e) => Globals.MapEditorWindow?.FlipVertical();
+        btnFlipHorizontal = new Button { Text = "Flip H" };
+        btnFlipHorizontal.Click += (s, e) => Globals.MapEditorWindow?.FlipHorizontal();
+        btnFill = new Button { Text = "Fill" };
+        btnFill.Click += (s, e) => Globals.CurrentTool = EditingTool.Fill;
+        btnErase = new Button { Text = "Erase" };
+        btnErase.Click += (s, e) => Globals.CurrentTool = EditingTool.Erase;
+        btnDropper = new Button { Text = "Pick", Enabled = false };
+        btnDropper.Click += (s, e) => Globals.CurrentTool = EditingTool.Dropper;
+        btnScreenshot = new Button { Text = "Screenshot" };
+        btnScreenshot.Click += (s, e) => TakeScreenshot();
+        btnRun = new Button { Text = "Run", Enabled = false };
+        btnRun.Click += (s, e) => RunClient();
+        btnBug = new Button { Text = "Bug" };
+        btnBug.Click += (s, e) => BrowserUtils.Open("https://github.com/AscensionGameDev/Intersect-Engine/issues/new/choose");
+        btnQuestion = new Button { Text = "Help" };
+        btnQuestion.Click += (s, e) => BrowserUtils.Open("https://www.ascensiongamedev.com/community/forum/53-questions-and-answers/");
     }
 
-    private void InitLocalizationMenus()
+    private void SetupStatusBar()
     {
-        InitLocalizationMenuFile();
-        InitLocalizationMenuEdit();
-        InitLocalizationMenuView();
-        InitLocalizationMenuGameEditors();
-        InitLocalizationMenuTools();
-        InitLocalizationMenuHelp();
+        lblCoords = new Label { Text = "" };
+        lblRevision = new Label { Text = "" };
+        lblFPS = new Label { Text = "FPS: 0" };
+        lblDebug = new Label { Text = "" };
     }
 
-    private void InitLocalizationMenuFile()
+    private void SetupLayout()
     {
-        fileToolStripMenuItem.Text = Strings.MainForm.file;
-        saveMapToolStripMenuItem.Text = Strings.MainForm.SaveMap;
-        newMapToolStripMenuItem.Text = Strings.MainForm.newmap;
-        importMapToolStripMenuItem.Text = Strings.MainForm.importmap;
-        exportMapToolStripMenuItem.Text = Strings.MainForm.exportmap;
-        optionsToolStripMenuItem.Text = Strings.MainForm.options;
-        exitToolStripMenuItem.Text = Strings.MainForm.exit;
-    }
+        // Map editor drawable
+        mapEditorDrawable = new Drawable { CanFocus = true, Size = new Size(1600, 1200), BackgroundColor = Colors.Blue };
+        mapEditorDrawable.Paint += MapEditorDrawable_Paint;
+        mapEditorScrollable = new Scrollable { Content = mapEditorDrawable, Size = new Size(800, 600) };
 
-    private void InitLocalizationMenuEdit()
-    {
-        editToolStripMenuItem.Text = Strings.MainForm.edit;
-        undoToolStripMenuItem.Text = Strings.MainForm.Undo;
-        redoToolStripMenuItem.Text = Strings.MainForm.Redo;
-        cutToolStripMenuItem.Text = Strings.MainForm.Cut;
-        copyToolStripMenuItem.Text = Strings.MainForm.Copy;
-        pasteToolStripMenuItem.Text = Strings.MainForm.Paste;
-        fillToolStripMenuItem.Text = Strings.MainForm.Fill;
-        eraseLayerToolStripMenuItem.Text = Strings.MainForm.Erase;
-        selectToolStripMenuItem.Text = Strings.MainForm.selectlayers;
-        allLayersToolStripMenuItem.Text = Strings.MainForm.alllayers;
-        currentLayerOnlyToolStripMenuItem.Text = Strings.MainForm.currentonly;
-    }
+        // Map grid drawable
+        mapGridDrawable = new Drawable { CanFocus = true };
+        mapGridDrawable.Paint += MapGridDrawable_Paint;
 
-    private void InitLocalizationMenuView()
-    {
-        viewToolStripMenuItem.Text = Strings.MainForm.view;
-        hideDarknessToolStripMenuItem.Text = Strings.MainForm.darkness;
-        hideFogToolStripMenuItem.Text = Strings.MainForm.fog;
-        hideOverlayToolStripMenuItem.Text = Strings.MainForm.overlay;
-        hideResourcesToolStripMenuItem.Text = Strings.MainForm.resources;
-        hideEventsToolStripMenuItem.Text = Strings.MainForm.Events;
-        hideTilePreviewToolStripMenuItem.Text = Strings.MainForm.tilepreview;
-        mapGridToolStripMenuItem.Text = Strings.MainForm.grid;
-    }
+        // Content tabs
+        contentTabs = new TabControl();
+        contentTabs.Pages.Add(new TabPage { Text = "Map Editor", Content = mapEditorScrollable });
+        contentTabs.Pages.Add(new TabPage { Text = "Map Grid", Content = mapGridDrawable });
 
-    private void InitLocalizationMenuGameEditors()
-    {
-        contentEditorsToolStripMenuItem.Text = Strings.MainForm.editors;
-        animationEditorToolStripMenuItem.Text = Strings.MainForm.animationeditor;
-        classEditorToolStripMenuItem.Text = Strings.MainForm.classeditor;
-        commonEventEditorToolStripMenuItem.Text = Strings.MainForm.commoneventeditor;
-        craftingTableEditorToolStripMenuItem.Text = Strings.MainForm.craftingtableeditor;
-        craftsEditorToolStripMenuItem.Text = Strings.MainForm.craftingeditor;
-        itemEditorToolStripMenuItem.Text = Strings.MainForm.itemeditor;
-        npcEditorToolStripMenuItem.Text = Strings.MainForm.npceditor;
-        projectileEditorToolStripMenuItem.Text = Strings.MainForm.projectileeditor;
-        questEditorToolStripMenuItem.Text = Strings.MainForm.questeditor;
-        resourceEditorToolStripMenuItem.Text = Strings.MainForm.resourceeditor;
-        shopEditorToolStripMenuItem.Text = Strings.MainForm.shopeditor;
-        spellEditorToolStripMenuItem.Text = Strings.MainForm.spelleditor;
-        variableEditorToolStripMenuItem.Text = Strings.MainForm.variableeditor;
-        timeEditorToolStripMenuItem.Text = Strings.MainForm.timeeditor;
-    }
+        // Side panel tabs
+        sideTabControl = new TabControl();
+        layersTab = new TabPage { Text = "Layers" };
+        mapListTab = new TabPage { Text = "Map List" };
+        mapPropertiesTab = new TabPage { Text = "Properties" };
 
-    private void InitLocalizationMenuTools()
-    {
-        toolsToolStripMenuItem.Text = Strings.MainForm.tools;
-        packageUpdateToolStripMenuItem.Text = Strings.MainForm.MenuToolsPackageUpdate;
-    }
+        // Create placeholder panels for side tabs
+        var layersPanel = new Panel();
+        var mapListPanel = new Panel();
+        var propsPanel = new Panel();
 
-    private void InitLocalizationMenuHelp()
-    {
-        helpToolStripMenuItem.Text = Strings.MainForm.help;
-        postQuestionToolStripMenuItem.Text = Strings.MainForm.postquestion;
-        toolStripButtonQuestion.Text = Strings.MainForm.postquestion;
-        reportBugToolStripMenuItem.Text = Strings.MainForm.reportbug;
-        toolStripButtonBug.Text = Strings.MainForm.reportbug;
-        aboutToolStripMenuItem.Text = Strings.MainForm.about;
-    }
+        if (Globals.MapLayersWindow is Panel layersWin)
+            layersPanel = layersWin;
+        if (Globals.MapListWindow is Panel listWin)
+            mapListPanel = listWin;
+        if (Globals.MapPropertiesWindow is Panel propsWin)
+            propsPanel = propsWin;
 
-    private void InitLocalizationToolstrip()
-    {
-        toolStripBtnNewMap.Text = Strings.MainForm.newmap;
-        toolStripBtnSaveMap.Text = Strings.MainForm.SaveMap;
+        layersTab.Content = layersPanel;
+        mapListTab.Content = mapListPanel;
+        mapPropertiesTab.Content = propsPanel;
+        sideTabControl.Pages.Add(layersTab);
+        sideTabControl.Pages.Add(mapListTab);
+        sideTabControl.Pages.Add(mapPropertiesTab);
 
-        toolStripBtnCut.Text = Strings.MainForm.Cut;
-        toolStripBtnCopy.Text = Strings.MainForm.Copy;
-        toolStripBtnPaste.Text = Strings.MainForm.Paste;
-
-        toolStripBtnUndo.Text = Strings.MainForm.Undo;
-        toolStripBtnRedo.Text = Strings.MainForm.Redo;
-
-        toolStripBtnBrush.Text = Strings.MainForm.Brush;
-        toolStripBtnSelect.Text = Strings.MainForm.Selection;
-        toolStripBtnRect.Text = Strings.MainForm.Rectangle;
-
-        toolStripBtnFlipVertical.Text = Strings.MainForm.FlipVertical;
-        toolStripBtnFlipHorizontal.Text = Strings.MainForm.FlipHorizontal;
-
-        toolStripBtnFill.Text = Strings.MainForm.Fill;
-        toolStripBtnErase.Text = Strings.MainForm.Erase;
-        toolStripBtnDropper.Text = Strings.MainForm.Dropper;
-
-        toolStripTimeButton.Text = Strings.MainForm.lighting;
-
-        toolStripBtnScreenshot.Text = Strings.MainForm.screenshot;
-
-        toolStripBtnRun.Text = Strings.MainForm.run;
-    }
-
-    private void InitExternalTools()
-    {
-        var foundTools = false;
-        if (Directory.Exists(Strings.MainForm.toolsdir))
+        // Toolbar layout
+        var toolbarLayout = new StackLayout
         {
-            var childDirs = Directory.GetDirectories("tools");
-            for (var i = 0; i < childDirs.Length; i++)
+            Orientation = Orientation.Horizontal,
+            Spacing = 2,
+            Items =
             {
-                var executables = Directory.GetFiles(childDirs[i], "*.exe");
-                for (var x = 0; x < executables.Length; x++)
-                {
-                    var item = toolsToolStripMenuItem.DropDownItems.Add(
-                        executables[x]
-                            .Replace(childDirs[i], "")
-                            .Replace(".exe", "")
-                            .Replace(Path.DirectorySeparatorChar.ToString(), "")
-                    );
-
-                    item.Tag = executables[x];
-                    item.Click += externalToolItem_Click;
-                }
+                btnNewMap, btnSaveMap, new StackLayoutItem(null, true),
+                btnCut, btnCopy, btnPaste, new StackLayoutItem(null, true),
+                btnUndo, btnRedo, new StackLayoutItem(null, true),
+                btnBrush, btnSelect, btnRect, new StackLayoutItem(null, true),
+                btnFlipVertical, btnFlipHorizontal, new StackLayoutItem(null, true),
+                btnFill, btnErase, btnDropper, new StackLayoutItem(null, true),
+                btnScreenshot, btnRun, new StackLayoutItem(null, true),
+                btnBug, btnQuestion
             }
-        }
-    }
+        };
 
-    private void externalToolItem_Click(object sender, EventArgs e)
-    {
-        if (!string.IsNullOrEmpty((string)((ToolStripItem)sender).Tag))
+        // Status bar
+        var statusLayout = new StackLayout
         {
-            var psi = new ProcessStartInfo(Path.GetFileName((string)((ToolStripItem)sender).Tag))
-            {
-                WorkingDirectory = Path.GetDirectoryName((string)((ToolStripItem)sender).Tag)
-            };
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            Padding = new Padding(5),
+            Items = { lblCoords, lblRevision, lblFPS, lblDebug }
+        };
 
-            Process.Start(psi);
-        }
-    }
-
-    private void FrmMain_KeyDown(object sender, KeyEventArgs e)
-    {
-        switch (e.KeyData)
+        // Main splitter: side panel | content
+        var mainSplitter = new Splitter
         {
-            case Keys.Control | Keys.Z:
-                toolStripBtnUndo_Click(null, null);
-                return;
+            Position = 250,
+            Panel1 = sideTabControl,
+            Panel2 = contentTabs
+        };
 
-            case Keys.Control | Keys.Y:
-                toolStripBtnRedo_Click(null, null);
-                return;
+        // Main layout
+        var mainLayout = new DynamicLayout();
+        mainLayout.BeginVertical();
+        mainLayout.Add(toolbarLayout);
+        mainLayout.Add(mainSplitter, yscale: true);
+        mainLayout.Add(statusLayout);
+        mainLayout.EndVertical();
 
-            case Keys.Control | Keys.X:
-                toolStripBtnCut_Click(null, null);
-                return;
+        Content = mainLayout;
 
-            case Keys.Control | Keys.C:
-                toolStripBtnCopy_Click(null, null);
-                return;
-
-            case Keys.Control | Keys.V:
-                toolStripBtnPaste_Click(null, null);
-                return;
-
-            case Keys.Control | Keys.S:
-                toolStripBtnSaveMap_Click(null, null);
-                return;
-        }
-
-        var xDiff = 0;
-        var yDiff = 0;
-        if (dockLeft.ActiveContent == Globals.MapEditorWindow ||
-            dockLeft.ActiveContent == null &&
-            Globals.MapEditorWindow.DockPanel.ActiveDocument == Globals.MapEditorWindow)
+        // Timer to invalidate the drawable for repainting
+        var redrawTimer = new UITimer { Interval = 1.0 / 10.0 };
+        redrawTimer.Elapsed += (s, ev) =>
         {
-            switch (e.KeyCode)
-            {
-                // Shortcuts: Map grid scrolling.
-                case Keys.W:
-                case Keys.Up:
-                    yDiff -= 20;
-                    break;
-
-                case Keys.S:
-                case Keys.Down:
-                    yDiff += 20;
-                    break;
-
-                case Keys.A:
-                case Keys.Left:
-                    xDiff -= 20;
-                    break;
-
-                case Keys.D:
-                case Keys.Right:
-                    xDiff += 20;
-                    break;
-
-                // Shortcuts: Map grid Tools.
-                case Keys.B: // Brush.
-                    toolStripBtnBrush_Click(null, null);
-                    break;
-
-                case Keys.M: // Marquee Selection.
-                    toolStripBtnSelect_Click(null, null);
-                    break;
-
-                case Keys.R: // Rectangle.
-                    toolStripBtnRect_Click(null, null);
-                    break;
-
-                case Keys.PageUp: // Vertical Flip Selection.
-                    toolStripBtnFlipVertical_Click(null, null);
-                    break;
-
-                case Keys.PageDown: // Horizontal Flip Selection.
-                    toolStripBtnFlipHorizontal_Click(null, null);
-                    break;
-
-                case Keys.F: // Fill Tool.
-                    toolStripBtnFill_Click(null, null);
-                    break;
-
-                case Keys.E: // Erase.
-                    toolStripBtnErase_Click(null, null);
-                    break;
-
-                case Keys.I: // Dropper Tool.
-                    toolStripBtnDropper_Click(null, null);
-                    break;
-
-                case Keys.Delete: // Delete Selection.
-                    ToolKeyDelete();
-                    break;
-            }
-
-            if (xDiff != 0 || yDiff != 0)
-            {
-                var hWnd = WindowFromPoint(MousePosition);
-                if (hWnd != IntPtr.Zero)
-                {
-                    var ctl = FromHandle(hWnd);
-                    if (ctl != null)
-                    {
-                        if (ctl is ComboBox || ctl is DarkComboBox)
-                        {
-                            return;
-                        }
-                    }
-                }
-
-                Core.Graphics.CurrentView.X -= xDiff;
-                Core.Graphics.CurrentView.Y -= yDiff;
-                if (Core.Graphics.CurrentView.X > Options.Instance.Map.MapWidth * Options.Instance.Map.TileWidth)
-                {
-                    Core.Graphics.CurrentView.X = Options.Instance.Map.MapWidth * Options.Instance.Map.TileWidth;
-                }
-
-                if (Core.Graphics.CurrentView.Y > Options.Instance.Map.MapHeight * Options.Instance.Map.TileHeight)
-                {
-                    Core.Graphics.CurrentView.Y = Options.Instance.Map.MapHeight * Options.Instance.Map.TileHeight;
-                }
-
-                if (Core.Graphics.CurrentView.X - Globals.MapEditorWindow.picMap.Width <
-                    -Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth * 2)
-                {
-                    Core.Graphics.CurrentView.X = -Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth * 2 +
-                                                  Globals.MapEditorWindow.picMap.Width;
-                }
-
-                if (Core.Graphics.CurrentView.Y - Globals.MapEditorWindow.picMap.Height <
-                    -Options.Instance.Map.TileHeight * Options.Instance.Map.MapHeight * 2)
-                {
-                    Core.Graphics.CurrentView.Y =
-                        -Options.Instance.Map.TileHeight * Options.Instance.Map.MapHeight * 2 +
-                        Globals.MapEditorWindow.picMap.Height;
-                }
-            }
-        }
+            mapEditorDrawable.Invalidate(true);
+        };
+        redrawTimer.Start();
     }
 
-    private void InitMapProperties()
+    private static int sPaintCount = 0;
+    private void MapEditorDrawable_Paint(object sender, PaintEventArgs e)
     {
-        var unhiddenPane = dockLeft.Panes[0];
-        Globals.MapPropertiesWindow = new FrmMapProperties();
-        Globals.MapPropertiesWindow.Show(unhiddenPane, DockAlignment.Bottom, .4);
-        Globals.MapPropertiesWindow.Init(Globals.CurrentMap);
-        Globals.MapEditorWindow.DockPanel.Focus();
-    }
+        sPaintCount++;
+        Console.WriteLine($"MapEditorDrawable_Paint called #{sPaintCount}, clip={e.ClipRectangle}");
 
-    private void InitEditor()
-    {
-        Core.Graphics.InitMonogame();
-        Globals.MapLayersWindow.InitTilesets();
-        Globals.MapLayersWindow.Init();
-        Globals.InEditor = true;
-        GrabMouseDownEvents();
-        UpdateRunState();
-
-        //Init layer visibility buttons
-        foreach (var layer in Options.Instance.Map.Layers.All)
+        // Use Eto.Forms bitmap rendering (works on Linux without MonoGame headless device)
+        var mapBitmap = Core.Graphics.RenderMapToBitmap();
+        if (mapBitmap != null)
         {
-            Strings.Tiles.maplayers.TryGetValue(layer.ToLower(), out LocalizedString layerName);
-            if (layerName == null) layerName = layer;
-            var btn = new ToolStripMenuItem(layerName);
-            btn.Checked = true;
-            btn.Click += HideLayerBtn_Click;
-            btn.Tag = layer;
-            layersToolStripMenuItem.DropDownItems.Add(btn);
+            e.Graphics.DrawImage(mapBitmap, 0, 0);
         }
-    }
-
-    protected override void OnClosed(EventArgs e)
-    {
-        Networking.Network.EditorLidgrenNetwork?.Disconnect(NetworkStatus.Quitting.ToString());
-        base.OnClosed(e);
-        Application.Exit();
-    }
-
-    public void ShowDialogForm(Form form)
-    {
-        if (InvokeRequired)
+        else
         {
-            Invoke((MethodInvoker)delegate { ShowDialogForm(form); });
+            // Draw debug indicator
+            var rect = e.ClipRectangle;
+            e.Graphics.DrawLine(Colors.Red, 0, 0, rect.Width, rect.Height);
+            e.Graphics.DrawLine(Colors.Red, rect.Width, 0, 0, rect.Height);
 
-            return;
+            var status = Globals.CurrentMap != null ? "Map loaded, rendering..." : "No map loaded";
+            e.Graphics.DrawText(new Font(SystemFont.Default), Colors.White, 10, 10, status);
+        }
+    }
+
+    private void MapGridDrawable_Paint(object sender, PaintEventArgs e)
+    {
+        // Map grid rendering placeholder
+    }
+
+    // Public methods for external access
+    public void UpdateFpsLabel(int fps)
+    {
+        Application.Instance.Invoke(() =>
+        {
+            lblFPS.Text = $"FPS: {fps}";
+        });
+    }
+
+    public void Update()
+    {
+        if (Globals.CurrentMap != null)
+        {
+            lblCoords.Text = Strings.MainForm.loc.ToString(Globals.CurTileX, Globals.CurTileY);
+            lblRevision.Text = Strings.MainForm.revision.ToString(Globals.CurrentMap.Revision);
+            Title = Strings.MainForm.title.ToString(Globals.CurrentMap.Name);
         }
 
-        form.ShowDialog(this);
+        // Update button states
+        bool hasUndo = Globals.MapEditorWindow != null && Globals.MapEditorWindow.MapUndoStates?.Count > 0;
+        bool hasRedo = Globals.MapEditorWindow != null && Globals.MapEditorWindow.MapRedoStates?.Count > 0;
+        btnUndo.Enabled = hasUndo;
+        btnRedo.Enabled = hasRedo;
+        undoMenuItem.Enabled = hasUndo;
+        redoMenuItem.Enabled = hasRedo;
+
+        bool canFillErase = Options.Instance.Map.Layers.All.Contains(Globals.CurrentLayer) ||
+                            Globals.CurrentLayer == "Attributes";
+        btnFill.Enabled = canFillErase;
+        btnErase.Enabled = canFillErase;
+        fillMenuItem.Enabled = canFillErase;
+        eraseLayerMenuItem.Enabled = canFillErase;
+
+        // Tool button states
+        btnBrush.Enabled = false;
+        btnSelect.Enabled = true;
+        btnRect.Enabled = false;
+        btnDropper.Enabled = false;
+
+        if (Globals.CurrentLayer == "Attributes")
+        {
+            btnBrush.Enabled = true;
+            btnRect.Enabled = true;
+        }
+        else if (Globals.CurrentLayer == "Lights" ||
+                 Globals.CurrentLayer == "Events" ||
+                 Globals.CurrentLayer == "NPCs")
+        {
+            Globals.CurrentTool = EditingTool.Selection;
+        }
+        else
+        {
+            btnBrush.Enabled = true;
+            btnRect.Enabled = true;
+            btnDropper.Enabled = true;
+        }
+
+        // Paste state
+        btnPaste.Enabled = Globals.HasCopy;
+        pasteMenuItem.Enabled = Globals.HasCopy;
     }
 
     public void EnterMap(Guid mapId, bool userEntered = false)
     {
-        if (InvokeRequired)
-        {
-            Invoke((MethodInvoker)delegate { EnterMap(mapId, userEntered); });
-
-            return;
-        }
-
         Globals.CurrentMap = MapInstance.Get(mapId);
         Globals.LoadingMap = mapId;
-        if (Globals.CurrentMap == null)
+
+        if (Globals.CurrentMap != null && Globals.MapPropertiesWindow != null)
         {
-            Text = @"Intersect Editor";
-        }
-        else
-        {
-            if (Globals.MapPropertiesWindow != null)
-            {
-                Globals.MapPropertiesWindow.Init(Globals.CurrentMap);
-            }
+            Globals.MapPropertiesWindow.Init(Globals.CurrentMap);
         }
 
-        Globals.MapEditorWindow.UnloadMap();
+        Globals.MapEditorWindow?.UnloadMap();
         PacketSender.SendEnterMap(mapId);
         PacketSender.SendNeedMap(mapId);
         PacketSender.SendNeedGrid(mapId);
         Core.Graphics.TilePreviewUpdated = true;
 
-        // Save that we've opened this map last if this was a user triggered action. This way we can load it again should we restart the editor.
+        // Resize the map drawable to fit the map
+        var mapWidth = (Options.Instance.Map.MapWidth + 2) * Options.Instance.Map.TileWidth;
+        var mapHeight = (Options.Instance.Map.MapHeight + 2) * Options.Instance.Map.TileHeight;
+        mapEditorDrawable.Size = new Eto.Drawing.Size(mapWidth, mapHeight);
+        mapEditorScrollable.ScrollSize = new Eto.Drawing.Size(mapWidth, mapHeight);
+        Core.Graphics.InvalidateMap();
+
         if (userEntered)
         {
             Preferences.SavePreference("LastMapOpened", mapId.ToString());
         }
     }
 
-    private void GrabMouseDownEvents()
+    public void ShowDialogForm(Form form)
     {
-        GrabMouseDownEvents(this);
+        form.Show();
     }
 
-    private void GrabMouseDownEvents(Control e)
+    // Menu event handlers
+    private void SaveMapMenuItem_Click()
     {
-        foreach (Control t in e.Controls)
+        if (Globals.CurrentMap?.Changed() == true)
         {
-            if (t is MenuStrip menuStrip)
-            {
-                foreach (ToolStripMenuItem t1 in menuStrip.Items)
-                {
-                    t1.MouseDown += MouseDownHandler;
-                }
-
-                t.MouseDown += MouseDownHandler;
-            }
-            else if (t is PropertyGrid)
-            {
-            }
-            else
-            {
-                GrabMouseDownEvents(t);
-            }
-        }
-
-        e.MouseDown += MouseDownHandler;
-    }
-
-    public void MouseDownHandler(object sender, MouseEventArgs e)
-    {
-        if (e.Button == MouseButtons.Middle || e.Button == MouseButtons.None)
-        {
-            return;
-        }
-
-        if (sender != Globals.MapEditorWindow &&
-            sender != Globals.MapEditorWindow.pnlMapContainer &&
-            sender != Globals.MapEditorWindow.picMap)
-        {
-            Globals.MapEditorWindow.PlaceSelection();
-        }
-    }
-
-    //Update
-    public void Update()
-    {
-        if (Globals.CurrentMap != null)
-        {
-            toolStripLabelCoords.Text = Strings.MainForm.loc.ToString(Globals.CurTileX, Globals.CurTileY);
-            toolStripLabelRevision.Text = Strings.MainForm.revision.ToString(Globals.CurrentMap.Revision);
-            if (Text != Strings.MainForm.title.ToString(Globals.CurrentMap.Name))
-            {
-                Text = Strings.MainForm.title.ToString(Globals.CurrentMap.Name);
-            }
-        }
-
-        //Process the Undo/Redo Buttons
-        if (Globals.MapEditorWindow.MapUndoStates.Count > 0)
-        {
-            toolStripBtnUndo.Enabled = true;
-            undoToolStripMenuItem.Enabled = true;
-        }
-        else
-        {
-            toolStripBtnUndo.Enabled = false;
-            undoToolStripMenuItem.Enabled = false;
-        }
-
-        if (Globals.MapEditorWindow.MapRedoStates.Count > 0)
-        {
-            toolStripBtnRedo.Enabled = true;
-            redoToolStripMenuItem.Enabled = true;
-        }
-        else
-        {
-            toolStripBtnRedo.Enabled = false;
-            redoToolStripMenuItem.Enabled = false;
-        }
-
-        //Process the Fill/Erase Buttons, these should display for all valid map layers as well as Attributes.
-        if (Options.Instance.Map.Layers.All.Contains(Globals.CurrentLayer) ||
-            Globals.CurrentLayer == LayerOptions.Attributes)
-        {
-            toolStripBtnFill.Enabled = true;
-            fillToolStripMenuItem.Enabled = true;
-            toolStripBtnErase.Enabled = true;
-            eraseLayerToolStripMenuItem.Enabled = true;
-        }
-        else
-        {
-            toolStripBtnFill.Enabled = false;
-            fillToolStripMenuItem.Enabled = false;
-            toolStripBtnErase.Enabled = false;
-            eraseLayerToolStripMenuItem.Enabled = false;
-        }
-
-        //Process the Tool Buttons
-        toolStripBtnBrush.Enabled = false;
-        toolStripBtnSelect.Enabled = true;
-        toolStripBtnRect.Enabled = false;
-        toolStripBtnDropper.Enabled = false;
-        if (Globals.CurrentLayer == LayerOptions.Attributes)
-        {
-            toolStripBtnBrush.Enabled = true;
-            toolStripBtnRect.Enabled = true;
-        }
-        else if (Globals.CurrentLayer == LayerOptions.Lights)
-        {
-            Globals.CurrentTool = EditingTool.Selection;
-        }
-        else if (Globals.CurrentLayer == LayerOptions.Events)
-        {
-            Globals.CurrentTool = EditingTool.Selection;
-        }
-        else if (Globals.CurrentLayer == LayerOptions.Npcs)
-        {
-            Globals.CurrentTool = EditingTool.Selection;
-        }
-        else
-        {
-            toolStripBtnBrush.Enabled = true;
-            toolStripBtnRect.Enabled = true;
-            toolStripBtnDropper.Enabled = true;
-        }
-
-        switch (Globals.CurrentTool)
-        {
-            case EditingTool.Brush:
-                if (!toolStripBtnBrush.Checked)
-                {
-                    toolStripBtnBrush.Checked = true;
-                }
-
-                if (toolStripBtnSelect.Checked)
-                {
-                    toolStripBtnSelect.Checked = false;
-                }
-
-                if (toolStripBtnRect.Checked)
-                {
-                    toolStripBtnRect.Checked = false;
-                }
-
-                if (toolStripBtnFill.Checked)
-                {
-                    toolStripBtnFill.Checked = false;
-                }
-
-                if (toolStripBtnErase.Checked)
-                {
-                    toolStripBtnErase.Checked = false;
-                }
-
-                if (toolStripBtnDropper.Checked)
-                {
-                    toolStripBtnDropper.Checked = false;
-                }
-
-                if (toolStripBtnCut.Enabled)
-                {
-                    toolStripBtnCut.Enabled = false;
-                }
-
-                if (toolStripBtnCopy.Enabled)
-                {
-                    toolStripBtnCopy.Enabled = false;
-                }
-
-                if (cutToolStripMenuItem.Enabled)
-                {
-                    cutToolStripMenuItem.Enabled = false;
-                }
-
-                if (copyToolStripMenuItem.Enabled)
-                {
-                    copyToolStripMenuItem.Enabled = false;
-                }
-
-                break;
-            case EditingTool.Selection:
-                if (toolStripBtnBrush.Checked)
-                {
-                    toolStripBtnBrush.Checked = false;
-                }
-
-                if (!toolStripBtnSelect.Checked)
-                {
-                    toolStripBtnSelect.Checked = true;
-                }
-
-                if (toolStripBtnRect.Checked)
-                {
-                    toolStripBtnRect.Checked = false;
-                }
-
-                if (toolStripBtnFill.Checked)
-                {
-                    toolStripBtnFill.Checked = false;
-                }
-
-                if (toolStripBtnErase.Checked)
-                {
-                    toolStripBtnErase.Checked = false;
-                }
-
-                if (toolStripBtnDropper.Checked)
-                {
-                    toolStripBtnDropper.Checked = false;
-                }
-
-                if (!toolStripBtnCut.Enabled)
-                {
-                    toolStripBtnCut.Enabled = true;
-                }
-
-                if (!toolStripBtnCopy.Enabled)
-                {
-                    toolStripBtnCopy.Enabled = true;
-                }
-
-                if (!cutToolStripMenuItem.Enabled)
-                {
-                    cutToolStripMenuItem.Enabled = true;
-                }
-
-                if (!copyToolStripMenuItem.Enabled)
-                {
-                    copyToolStripMenuItem.Enabled = true;
-                }
-
-                break;
-            case EditingTool.Rectangle:
-                if (toolStripBtnBrush.Checked)
-                {
-                    toolStripBtnBrush.Checked = false;
-                }
-
-                if (toolStripBtnSelect.Checked)
-                {
-                    toolStripBtnSelect.Checked = false;
-                }
-
-                if (!toolStripBtnRect.Checked)
-                {
-                    toolStripBtnRect.Checked = true;
-                }
-
-                if (toolStripBtnFill.Checked)
-                {
-                    toolStripBtnFill.Checked = false;
-                }
-
-                if (toolStripBtnErase.Checked)
-                {
-                    toolStripBtnErase.Checked = false;
-                }
-
-                if (toolStripBtnDropper.Checked)
-                {
-                    toolStripBtnDropper.Checked = false;
-                }
-
-                if (toolStripBtnCut.Enabled)
-                {
-                    toolStripBtnCut.Enabled = false;
-                }
-
-                if (toolStripBtnCopy.Enabled)
-                {
-                    toolStripBtnCopy.Enabled = false;
-                }
-
-                if (cutToolStripMenuItem.Enabled)
-                {
-                    cutToolStripMenuItem.Enabled = false;
-                }
-
-                if (copyToolStripMenuItem.Enabled)
-                {
-                    copyToolStripMenuItem.Enabled = false;
-                }
-
-                break;
-            case EditingTool.Fill:
-                if (toolStripBtnBrush.Checked)
-                {
-                    toolStripBtnBrush.Checked = false;
-                }
-
-                if (toolStripBtnSelect.Checked)
-                {
-                    toolStripBtnSelect.Checked = false;
-                }
-
-                if (toolStripBtnRect.Checked)
-                {
-                    toolStripBtnRect.Checked = false;
-                }
-
-                if (!toolStripBtnFill.Checked)
-                {
-                    toolStripBtnFill.Checked = true;
-                }
-
-                if (toolStripBtnErase.Checked)
-                {
-                    toolStripBtnErase.Checked = false;
-                }
-
-                if (toolStripBtnDropper.Checked)
-                {
-                    toolStripBtnDropper.Checked = false;
-                }
-
-                if (toolStripBtnCut.Enabled)
-                {
-                    toolStripBtnCut.Enabled = false;
-                }
-
-                if (toolStripBtnCopy.Enabled)
-                {
-                    toolStripBtnCopy.Enabled = false;
-                }
-
-                if (cutToolStripMenuItem.Enabled)
-                {
-                    cutToolStripMenuItem.Enabled = false;
-                }
-
-                if (copyToolStripMenuItem.Enabled)
-                {
-                    copyToolStripMenuItem.Enabled = false;
-                }
-
-                break;
-            case EditingTool.Erase:
-                if (toolStripBtnBrush.Checked)
-                {
-                    toolStripBtnBrush.Checked = false;
-                }
-
-                if (toolStripBtnSelect.Checked)
-                {
-                    toolStripBtnSelect.Checked = false;
-                }
-
-                if (toolStripBtnRect.Checked)
-                {
-                    toolStripBtnRect.Checked = false;
-                }
-
-                if (toolStripBtnFill.Checked)
-                {
-                    toolStripBtnFill.Checked = false;
-                }
-
-                if (!toolStripBtnErase.Checked)
-                {
-                    toolStripBtnErase.Checked = true;
-                }
-
-                if (toolStripBtnDropper.Checked)
-                {
-                    toolStripBtnDropper.Checked = false;
-                }
-
-                if (toolStripBtnCut.Enabled)
-                {
-                    toolStripBtnCut.Enabled = false;
-                }
-
-                if (toolStripBtnCopy.Enabled)
-                {
-                    toolStripBtnCopy.Enabled = false;
-                }
-
-                if (cutToolStripMenuItem.Enabled)
-                {
-                    cutToolStripMenuItem.Enabled = false;
-                }
-
-                if (copyToolStripMenuItem.Enabled)
-                {
-                    copyToolStripMenuItem.Enabled = false;
-                }
-
-                break;
-            case EditingTool.Dropper:
-                if (toolStripBtnBrush.Checked)
-                {
-                    toolStripBtnBrush.Checked = false;
-                }
-
-                if (toolStripBtnSelect.Checked)
-                {
-                    toolStripBtnSelect.Checked = false;
-                }
-
-                if (toolStripBtnRect.Checked)
-                {
-                    toolStripBtnRect.Checked = false;
-                }
-
-                if (toolStripBtnFill.Checked)
-                {
-                    toolStripBtnFill.Checked = false;
-                }
-
-                if (toolStripBtnErase.Checked)
-                {
-                    toolStripBtnErase.Checked = false;
-                }
-
-                if (!toolStripBtnDropper.Checked)
-                {
-                    toolStripBtnDropper.Checked = true;
-                }
-
-                if (toolStripBtnCut.Enabled)
-                {
-                    toolStripBtnCut.Enabled = false;
-                }
-
-                if (toolStripBtnCopy.Enabled)
-                {
-                    toolStripBtnCopy.Enabled = false;
-                }
-
-                if (cutToolStripMenuItem.Enabled)
-                {
-                    cutToolStripMenuItem.Enabled = false;
-                }
-
-                if (copyToolStripMenuItem.Enabled)
-                {
-                    copyToolStripMenuItem.Enabled = false;
-                }
-
-                break;
-        }
-
-        if (Globals.HasCopy)
-        {
-            toolStripBtnPaste.Enabled = true;
-            pasteToolStripMenuItem.Enabled = true;
-        }
-        else
-        {
-            toolStripBtnPaste.Enabled = false;
-            pasteToolStripMenuItem.Enabled = false;
-        }
-
-        if (Globals.Dragging)
-        {
-            if (Globals.MainForm.ActiveControl is DockPane dockPane)
-            {
-                var ctrl = dockPane.ActiveControl;
-                if (ctrl != Globals.MapEditorWindow)
-                {
-                    Globals.MapEditorWindow.PlaceSelection();
-                }
-            }
-        }
-    }
-
-    //Disconnection
-    private void HandleServerDisconnect()
-    {
-        if (!Globals.ClosingEditor)
-        {
-            Globals.ClosingEditor = true;
-
-            //Offer to export map
-            if (Globals.CurrentMap != null)
-            {
-                if (DarkMessageBox.ShowError(
-                        Strings.Errors.disconnectedsave,
-                        Strings.Errors.disconnectedsavecaption,
-                        DarkDialogButton.YesNo,
-                        Icon
-                    ) ==
-                    DialogResult.Yes)
-                {
-                    exportMapToolStripMenuItem_Click(null, null);
-                    Application.Exit();
-                }
-                else
-                {
-                    Application.Exit();
-                }
-            }
-            else
-            {
-                DarkMessageBox.ShowError(
-                    Strings.Errors.disconnectedclosing,
-                    Strings.Errors.disconnected,
-                    DarkDialogButton.Ok,
-                    Icon
-                );
-
-                Application.Exit();
-            }
-        }
-    }
-
-    //MenuBar Functions -- File
-    private void saveMapToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        if (Globals.CurrentMap.Changed() &&
-            DarkMessageBox.ShowInformation(
+            var result = MessageBox.Show(
                 Strings.Mapping.savemapdialoguesure,
                 Strings.Mapping.savemap,
-                DarkDialogButton.YesNo,
-                Icon
-            ) ==
-            DialogResult.Yes)
-        {
-            SaveMap();
+                MessageBoxButtons.YesNo,
+                MessageBoxType.Question
+            );
+            if (result == DialogResult.Yes)
+            {
+                SaveMap();
+            }
         }
     }
 
     private static void SaveMap()
     {
-        if (Globals.CurrentTool == EditingTool.Selection)
+        if (Globals.CurrentTool == EditingTool.Selection && Globals.Dragging)
         {
-            if (Globals.Dragging)
-            {
-                //Place the change, we done!
-                Globals.MapEditorWindow?.ProcessSelectionMovement(Globals.CurrentMap, true);
-                Globals.MapEditorWindow?.PlaceSelection();
-            }
+            Globals.MapEditorWindow?.ProcessSelectionMovement(Globals.CurrentMap, true);
+            Globals.MapEditorWindow?.PlaceSelection();
         }
-
         PacketSender.SendMap(Globals.CurrentMap);
     }
 
-    private void NewMapToolStripMenuItem_Click(object sender, EventArgs e)
+    private void NewMapMenuItem_Click()
     {
-        if (DarkMessageBox.ShowWarning(
-                Strings.Mapping.newmap,
-                Strings.Mapping.newmapcaption,
-                DarkDialogButton.YesNo,
-                Icon
-            ) !=
-            DialogResult.Yes)
-        {
-            return;
-        }
+        var result = MessageBox.Show(
+            Strings.Mapping.newmap,
+            Strings.Mapping.newmapcaption,
+            MessageBoxButtons.YesNo,
+            MessageBoxType.Warning
+        );
+        if (result != DialogResult.Yes) return;
 
-        if (Globals.CurrentMap.Changed() &&
-            DarkMessageBox.ShowInformation(
+        if (Globals.CurrentMap?.Changed() == true)
+        {
+            var saveResult = MessageBox.Show(
                 Strings.Mapping.savemapdialogue,
                 Strings.Mapping.savemap,
-                DarkDialogButton.YesNo,
-                Icon
-            ) ==
-            DialogResult.Yes)
-        {
-            SaveMap();
+                MessageBoxButtons.YesNo,
+                MessageBoxType.Question
+            );
+            if (saveResult == DialogResult.Yes)
+            {
+                SaveMap();
+            }
         }
-
         PacketSender.SendCreateMap(-1, Globals.CurrentMap.Id, null);
     }
 
-    private void exportMapToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        var fileDialog = new SaveFileDialog()
-        {
-            Filter = "Intersect Map|*.imap", Title = Strings.MainForm.exportmap
-        };
-
-        //TODO Reimplement
-        //fileDialog.ShowDialog();
-        //var buff = new ByteBuffer();
-        //buff.WriteString(Application.ProductVersion);
-        //buff.WriteBytes(Globals.CurrentMap.SaveInternal());
-        //if (fileDialog.FileName != "")
-        //{
-        //    File.WriteAllBytes(fileDialog.FileName, buff.ToArray());
-        //}
-        //buff.Dispose();
-    }
-
-    private void importMapToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        var fileDialog = new OpenFileDialog()
-        {
-            Filter = "Intersect Map|*.imap", Title = Strings.MainForm.importmap
-        };
-
-        //TODO Reimplement
-        //fileDialog.ShowDialog();
-
-        //if (fileDialog.FileName != "")
-        //{
-        //    var data = File.ReadAllBytes(fileDialog.FileName);
-        //    var buff = new ByteBuffer();
-        //    buff.WriteBytes(data);
-        //    if (buff.ReadString() == Application.ProductVersion)
-        //    {
-        //        Globals.MapEditorWindow.PrepUndoState();
-        //        Globals.CurrentMap.LoadInternal(buff.ReadBytes(buff.Length(), true));
-        //        Globals.MapEditorWindow.AddUndoState();
-        //    }
-        //    else
-        //    {
-        //        DarkMessageBox.ShowError(Strings.Errors.importfailed,
-        //            Strings.Errors.importfailedcaption, DarkDialogButton.Ok, Icon);
-        //    }
-        //}
-    }
-
-    private void optionsToolStripMenuItem_Click(object sender, EventArgs e)
+    private void OptionsMenuItem_Click()
     {
         var optionsForm = new FrmOptions();
-        optionsForm.ShowDialog();
+        optionsForm.Show();
         UpdateRunState();
     }
 
-    private void exitToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        Application.Exit();
-    }
-
-    //Edit
-    private void fillToolStripMenuItem_Click(object sender, EventArgs e)
+    private void Fill()
     {
         if (Options.Instance.Map.Layers.All.Contains(Globals.CurrentLayer))
         {
-            Globals.MapEditorWindow.FillLayer();
+            Globals.MapEditorWindow?.FillLayer();
         }
     }
 
-    private void eraseLayerToolStripMenuItem_Click(object sender, EventArgs e)
+    private void EraseLayer()
     {
         if (Options.Instance.Map.Layers.All.Contains(Globals.CurrentLayer))
         {
-            Globals.MapEditorWindow.EraseLayer();
+            Globals.MapEditorWindow?.EraseLayer();
         }
     }
 
-    private void allLayersToolStripMenuItem_Click(object sender, EventArgs e)
+    private void Undo()
     {
-        Globals.SelectionType = (int)SelectionTypes.AllLayers;
-        allLayersToolStripMenuItem.Checked = true;
-        currentLayerOnlyToolStripMenuItem.Checked = false;
-    }
-
-    private void currentLayerOnlyToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        Globals.SelectionType = (int)SelectionTypes.CurrentLayer;
-        allLayersToolStripMenuItem.Checked = false;
-        currentLayerOnlyToolStripMenuItem.Checked = true;
-    }
-
-    private void undoToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        toolStripBtnUndo_Click(null, null);
-    }
-
-    private void redoToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        toolStripBtnRedo_Click(null, null);
-    }
-
-    private void cutToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        toolStripBtnCut_Click(null, null);
-    }
-
-    private void copyToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        toolStripBtnCopy_Click(null, null);
-    }
-
-    private void pasteToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        toolStripBtnPaste_Click(null, null);
-    }
-
-    //View
-    private void hideDarknessToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        Core.Graphics.HideDarkness = !Core.Graphics.HideDarkness;
-        hideDarknessToolStripMenuItem.Checked = !Core.Graphics.HideDarkness;
-    }
-
-    private void hideFogToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        Core.Graphics.HideFog = !Core.Graphics.HideFog;
-        hideFogToolStripMenuItem.Checked = !Core.Graphics.HideFog;
-    }
-
-    private void hideOverlayToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        Core.Graphics.HideOverlay = !Core.Graphics.HideOverlay;
-        hideOverlayToolStripMenuItem.Checked = !Core.Graphics.HideOverlay;
-    }
-
-    private void hideTilePreviewToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        Core.Graphics.HideTilePreview = !Core.Graphics.HideTilePreview;
-        hideTilePreviewToolStripMenuItem.Checked = !Core.Graphics.HideTilePreview;
-    }
-
-    private void hideResourcesToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        Core.Graphics.HideResources = !Core.Graphics.HideResources;
-        hideResourcesToolStripMenuItem.Checked = !Core.Graphics.HideResources;
-    }
-
-    private void hideEventsToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        Core.Graphics.HideEvents = !Core.Graphics.HideEvents;
-        hideEventsToolStripMenuItem.Checked = !Core.Graphics.HideEvents;
-    }
-
-    private void mapGridToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        Core.Graphics.HideGrid = !Core.Graphics.HideGrid;
-        mapGridToolStripMenuItem.Checked = !Core.Graphics.HideGrid;
-    }
-
-    //Content Editors
-    private void itemEditorToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        PacketSender.SendOpenEditor(GameObjectType.Item);
-    }
-
-    private void npcEditorToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        PacketSender.SendOpenEditor(GameObjectType.Npc);
-    }
-
-    private void spellEditorToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        PacketSender.SendOpenEditor(GameObjectType.Spell);
-    }
-
-    private void craftingTablesEditorToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        PacketSender.SendOpenEditor(GameObjectType.CraftTables);
-    }
-
-    private void craftsEditorToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        PacketSender.SendOpenEditor(GameObjectType.Crafts);
-    }
-
-    private void animationEditorToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        PacketSender.SendOpenEditor(GameObjectType.Animation);
-    }
-
-    private void resourceEditorToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        PacketSender.SendOpenEditor(GameObjectType.Resource);
-    }
-
-    private void classEditorToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        PacketSender.SendOpenEditor(GameObjectType.Class);
-    }
-
-    private void questEditorToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        PacketSender.SendOpenEditor(GameObjectType.Quest);
-    }
-
-    private void projectileEditorToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        PacketSender.SendOpenEditor(GameObjectType.Projectile);
-    }
-
-    private void commonEventEditorToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        PacketSender.SendOpenEditor(GameObjectType.Event);
-    }
-
-    private void variableEditorToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        PacketSender.SendOpenEditor(GameObjectType.PlayerVariable);
-    }
-
-    private void shopEditorToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        PacketSender.SendOpenEditor(GameObjectType.Shop);
-    }
-
-    private void timeEditorToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        PacketSender.SendOpenEditor(GameObjectType.Time);
-    }
-
-    private void layersToolStripMenuItem_DropDownOpened(object sender, EventArgs e)
-    {
-        foreach (var itm in ((ToolStripMenuItem)sender).DropDownItems)
+        if (Globals.MapEditorWindow?.MapUndoStates?.Count > 0)
         {
-            var btn = (ToolStripMenuItem)itm;
-            btn.Checked = Globals.MapLayersWindow.LayerVisibility[(string)btn.Tag];
-        }
-    }
-
-    private void HideLayerBtn_Click(object sender, EventArgs e)
-    {
-        var btn = ((ToolStripMenuItem)sender);
-        var tag = (string)btn.Tag;
-        btn.Checked = !btn.Checked;
-        Globals.MapLayersWindow.LayerVisibility[tag] = btn.Checked;
-        Globals.MapLayersWindow.SetLayer(Globals.CurrentLayer);
-    }
-
-    //Help
-    private void postQuestionToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        toolStripButtonQuestion_Click(null, null);
-    }
-
-    private void reportBugToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        toolStripButtonBug_Click(null, null);
-    }
-
-    private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        var aboutfrm = new FrmAbout();
-        aboutfrm.ShowDialog();
-    }
-
-    //ToolStrip Functions
-    private void toolStripBtnNewMap_Click(object sender, EventArgs e)
-    {
-        NewMapToolStripMenuItem_Click(null, null);
-    }
-
-    private void toolStripBtnSaveMap_Click(object sender, EventArgs e)
-    {
-        saveMapToolStripMenuItem_Click(null, null);
-    }
-
-    private void toolStripBtnUndo_Click(object sender, EventArgs e)
-    {
-        var tmpMap = Globals.CurrentMap;
-        if (Globals.MapEditorWindow.MapUndoStates.Count > 0)
-        {
-            tmpMap.LoadInternal(Globals.MapEditorWindow.MapUndoStates[Globals.MapEditorWindow.MapUndoStates.Count - 1]);
-
+            var states = Globals.MapEditorWindow.MapUndoStates;
+            Globals.CurrentMap.LoadInternal(states[states.Count - 1]);
             Globals.MapEditorWindow.MapRedoStates.Add(Globals.MapEditorWindow.CurrentMapState);
-            Globals.MapEditorWindow.CurrentMapState =
-                Globals.MapEditorWindow.MapUndoStates[Globals.MapEditorWindow.MapUndoStates.Count - 1];
-
-            Globals.MapEditorWindow.MapUndoStates.RemoveAt(Globals.MapEditorWindow.MapUndoStates.Count - 1);
-            Globals.MapPropertiesWindow.Update();
+            Globals.MapEditorWindow.CurrentMapState = states[states.Count - 1];
+            states.RemoveAt(states.Count - 1);
+            Globals.MapPropertiesWindow?.Update();
             Core.Graphics.TilePreviewUpdated = true;
         }
     }
 
-    private void toolStripBtnRedo_Click(object sender, EventArgs e)
+    private void Redo()
     {
-        var tmpMap = Globals.CurrentMap;
-        if (Globals.MapEditorWindow.MapRedoStates.Count > 0)
+        if (Globals.MapEditorWindow?.MapRedoStates?.Count > 0)
         {
-            tmpMap.LoadInternal(Globals.MapEditorWindow.MapRedoStates[Globals.MapEditorWindow.MapRedoStates.Count - 1]);
-
+            var states = Globals.MapEditorWindow.MapRedoStates;
+            Globals.CurrentMap.LoadInternal(states[states.Count - 1]);
             Globals.MapEditorWindow.MapUndoStates.Add(Globals.MapEditorWindow.CurrentMapState);
-            Globals.MapEditorWindow.CurrentMapState =
-                Globals.MapEditorWindow.MapRedoStates[Globals.MapEditorWindow.MapRedoStates.Count - 1];
-
-            Globals.MapEditorWindow.MapRedoStates.RemoveAt(Globals.MapEditorWindow.MapRedoStates.Count - 1);
-            Globals.MapPropertiesWindow.Update();
+            Globals.MapEditorWindow.CurrentMapState = states[states.Count - 1];
+            states.RemoveAt(states.Count - 1);
+            Globals.MapPropertiesWindow?.Update();
             Core.Graphics.TilePreviewUpdated = true;
         }
     }
 
-    private void toolStripBtnFill_Click(object sender, EventArgs e)
+    private void Cut()
     {
-        Globals.CurrentTool = EditingTool.Fill;
-    }
-
-    private void toolStripBtnErase_Click(object sender, EventArgs e)
-    {
-        Globals.CurrentTool = EditingTool.Erase;
-    }
-
-    private void toolStripBtnScreenshot_Click(object sender, EventArgs e)
-    {
-        var fileDialog = new SaveFileDialog()
+        if (Globals.CurrentTool == EditingTool.Selection)
         {
-            Filter = "Png Image|*.png|JPeg Image|*.jpg|Bitmap Image|*.bmp|Gif Image|*.gif",
-            Title = Strings.MainForm.screenshot
+            Globals.MapEditorWindow?.Cut();
+        }
+    }
+
+    private void Copy()
+    {
+        if (Globals.CurrentTool == EditingTool.Selection)
+        {
+            Globals.MapEditorWindow?.Copy();
+        }
+    }
+
+    private void Paste()
+    {
+        if (Globals.HasCopy)
+        {
+            Globals.MapEditorWindow?.Paste();
+        }
+    }
+
+    private void TakeScreenshot()
+    {
+        var fileDialog = new SaveFileDialog
+        {
+            Title = Strings.MainForm.screenshot,
+            Filters = { new FileFilter("PNG Image", ".png"), new FileFilter("JPEG Image", ".jpg"), new FileFilter("Bitmap Image", ".bmp") }
         };
-
-        fileDialog.ShowDialog();
-
-        if (fileDialog.FileName != "")
+        if (fileDialog.ShowDialog(this) == DialogResult.Ok)
         {
-            using (var fs = new FileStream(fileDialog.FileName, FileMode.OpenOrCreate))
+            using var fs = new FileStream(fileDialog.FileName, FileMode.OpenOrCreate);
+            var screenshotTexture = Core.Graphics.ScreenShotMap();
+            if (screenshotTexture != null)
             {
-                var screenshotTexture = Core.Graphics.ScreenShotMap();
                 screenshotTexture.Save(fs, System.Drawing.Imaging.ImageFormat.Png);
             }
         }
     }
 
-    private void toolStripBtnBrush_Click(object sender, EventArgs e)
-    {
-        Globals.CurrentTool = EditingTool.Brush;
-    }
-
-    private void toolStripBtnSelect_Click(object sender, EventArgs e)
-    {
-        Globals.CurrentTool = EditingTool.Selection;
-        Globals.CurMapSelX = 0;
-        Globals.CurMapSelY = 0;
-        Globals.CurMapSelW = 0;
-        Globals.CurMapSelH = 0;
-    }
-
-    private void toolStripBtnRect_Click(object sender, EventArgs e)
-    {
-        Globals.CurrentTool = EditingTool.Rectangle;
-        Globals.CurMapSelX = 0;
-        Globals.CurMapSelY = 0;
-        Globals.CurMapSelW = 0;
-        Globals.CurMapSelH = 0;
-    }
-
-    private void toolStripBtnDropper_Click(object sender, EventArgs e)
-    {
-        Globals.CurrentTool = EditingTool.Dropper;
-        Globals.CurMapSelX = 0;
-        Globals.CurMapSelY = 0;
-    }
-
-    private void toolStripBtnCopy_Click(object sender, EventArgs e)
-    {
-        if (Globals.CurrentTool != EditingTool.Selection)
-        {
-            return;
-        }
-
-        Globals.MapEditorWindow.Copy();
-    }
-
-    private void toolStripBtnPaste_Click(object sender, EventArgs e)
-    {
-        if (!Globals.HasCopy)
-        {
-            return;
-        }
-
-        Globals.MapEditorWindow.Paste();
-    }
-
-    private void toolStripBtnCut_Click(object sender, EventArgs e)
-    {
-        if (Globals.CurrentTool != EditingTool.Selection)
-        {
-            return;
-        }
-
-        Globals.MapEditorWindow.Cut();
-    }
-
-    private static void ToolKeyDelete()
-    {
-        if (Globals.CurrentTool != EditingTool.Selection)
-        {
-            return;
-        }
-
-        Globals.MapEditorWindow.Delete();
-    }
-
-    private void toolStripTimeButton_Click(object sender, EventArgs e)
-    {
-    }
-
-    private void toolStripBtnRun_Click(object sender, EventArgs e)
+    private void RunClient()
     {
         var path = Preferences.LoadPreference("ClientPath");
         if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
         {
-            var processStartInfo = new ProcessStartInfo(path)
+            var psi = new ProcessStartInfo(path)
             {
-                WorkingDirectory = Directory.GetParent(path).FullName
+                WorkingDirectory = Directory.GetParent(path)?.FullName ?? ""
             };
-
-            _ = Process.Start(processStartInfo);
-        }
-    }
-
-    private void toolStripButtonQuestion_Click(object sender, EventArgs e)
-    {
-        BrowserUtils.Open("https://www.ascensiongamedev.com/community/forum/53-questions-and-answers/");
-    }
-
-    private void toolStripButtonBug_Click(object sender, EventArgs e)
-    {
-        BrowserUtils.Open("https://github.com/AscensionGameDev/Intersect-Engine/issues/new/choose");
-    }
-
-    private void UpdateTimeSimulationList()
-    {
-        Bitmap transtile = null;
-        if (File.Exists("resources/misc/transtile.png"))
-        {
-            transtile = new Bitmap("resources/misc/transtile.png");
-        }
-
-        toolStripTimeButton.DropDownItems.Clear();
-        var time = new DateTime(
-            2000,
-            1,
-            1,
-            0,
-            0,
-            0
-        );
-        var x = 0;
-        var btn = new ToolStripDropDownButton(Strings.General.None)
-        {
-            Tag = null
-        };
-
-        btn.Click += TimeDropdownButton_Click;
-        toolStripTimeButton.DropDownItems.Add(btn);
-        for (var i = 0; i < 1440; i += DaylightCycleDescriptor.Instance.RangeInterval)
-        {
-            var addRange = time.ToString("h:mm:ss tt") + " to ";
-            time = time.AddMinutes(DaylightCycleDescriptor.Instance.RangeInterval);
-            addRange += time.ToString("h:mm:ss tt");
-
-            //Create image of overlay color
-            var img = new Bitmap(16, 16);
-            var g = System.Drawing.Graphics.FromImage(img);
-            g.Clear(System.Drawing.Color.Transparent);
-
-            //Draw the trans tile if we have it
-            if (transtile != null)
-            {
-                g.DrawImage(transtile, new System.Drawing.Point(0, 0));
-            }
-
-            var clr = DaylightCycleDescriptor.Instance.DaylightHues[x];
-            Brush brush = new SolidBrush(System.Drawing.Color.FromArgb(clr.A, clr.R, clr.G, clr.B));
-            g.FillRectangle(brush, new System.Drawing.Rectangle(0, 0, 32, 32));
-
-            //Draw the overlay color
-            g.Dispose();
-
-            btn = new ToolStripDropDownButton(addRange, img)
-            {
-                Tag = clr
-            };
-
-            btn.Click += TimeDropdownButton_Click;
-            toolStripTimeButton.DropDownItems.Add(btn);
-            x++;
-        }
-
-        if (transtile != null)
-        {
-            transtile.Dispose();
-        }
-    }
-
-    private void TimeDropdownButton_Click(object sender, EventArgs e)
-    {
-        if (((ToolStripDropDownButton)sender).Tag == null)
-        {
-            Core.Graphics.LightColor = null;
-        }
-        else
-        {
-            Core.Graphics.LightColor = (Color)((ToolStripDropDownButton)sender).Tag;
+            Process.Start(psi);
         }
     }
 
     private void UpdateRunState()
     {
-        toolStripBtnRun.Enabled = false;
+        btnRun.Enabled = false;
         var path = Preferences.LoadPreference("ClientPath");
         if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
         {
-            toolStripBtnRun.Enabled = true;
+            btnRun.Enabled = true;
         }
     }
 
-    //Cross Threading Delegate Methods
+    private void HandleServerDisconnect()
+    {
+        if (!Globals.ClosingEditor)
+        {
+            Globals.ClosingEditor = true;
+            if (Globals.CurrentMap != null)
+            {
+                var result = MessageBox.Show(
+                    Strings.Errors.disconnectedsave,
+                    Strings.Errors.disconnectedsavecaption,
+                    MessageBoxButtons.YesNo,
+                    MessageBoxType.Error
+                );
+                if (result == DialogResult.Yes)
+                {
+                    TakeScreenshot();
+                }
+            }
+            else
+            {
+                MessageBox.Show(
+                    Strings.Errors.disconnectedclosing,
+                    Strings.Errors.disconnected,
+                    MessageBoxButtons.OK,
+                    MessageBoxType.Error
+                );
+            }
+            Application.Instance.Quit();
+        }
+    }
+
     private void TryOpenEditorMethod(GameObjectType type)
     {
-        if (Globals.CurrentEditor == -1)
+        if (Globals.CurrentEditor != -1) return;
+
+        Console.WriteLine($"Opening editor for: {type}");
+        Globals.CurrentEditor = (int)type;
+
+        try
         {
             switch (type)
             {
                 case GameObjectType.Animation:
-                    if (mAnimationEditor == null || mAnimationEditor.Visible == false)
-                    {
-                        mAnimationEditor = new FrmAnimation();
-                        mAnimationEditor.InitEditor();
-                        mAnimationEditor.Show();
-                    }
-
+                    Console.WriteLine("Creating FrmAnimation...");
+                    var animEditor = new FrmAnimation();
+                    Console.WriteLine("FrmAnimation created, calling InitEditor...");
+                    try { animEditor.InitEditor(); } catch (Exception ex) { Console.WriteLine($"InitEditor error: {ex.Message}\n{ex.StackTrace}"); }
+                    Console.WriteLine("Showing FrmAnimation...");
+                    animEditor.Show();
                     break;
                 case GameObjectType.Item:
-                    if (mItemEditor == null || mItemEditor.Visible == false)
-                    {
-                        mItemEditor = new FrmItem();
-                        mItemEditor.InitEditor();
-                        mItemEditor.Show();
-                    }
-
+                    var itemEditor = new FrmItem();
+                    try { itemEditor.InitEditor(); } catch (Exception ex) { Console.WriteLine($"InitEditor error: {ex}"); }
+                    itemEditor.Show();
                     break;
                 case GameObjectType.Npc:
-                    if (mNpcEditor == null || mNpcEditor.Visible == false)
-                    {
-                        mNpcEditor = new FrmNpc();
-                        mNpcEditor.InitEditor();
-                        mNpcEditor.Show();
-                    }
-
+                    var npcEditor = new FrmNpc();
+                    try { npcEditor.InitEditor(); } catch (Exception ex) { Console.WriteLine($"InitEditor error: {ex}"); }
+                    npcEditor.Show();
                     break;
                 case GameObjectType.Resource:
-                    if (mResourceEditor == null || mResourceEditor.Visible == false)
-                    {
-                        mResourceEditor = new FrmResource();
-                        mResourceEditor.InitEditor();
-                        mResourceEditor.Show();
-                    }
-
+                    var resEditor = new FrmResource();
+                    try { resEditor.InitEditor(); } catch (Exception ex) { Console.WriteLine($"InitEditor error: {ex}"); }
+                    resEditor.Show();
                     break;
                 case GameObjectType.Spell:
-                    if (mSpellEditor == null || mSpellEditor.Visible == false)
-                    {
-                        mSpellEditor = new FrmSpell();
-                        mSpellEditor.InitEditor();
-                        mSpellEditor.Show();
-                    }
-
+                    var spellEditor = new FrmSpell();
+                    try { spellEditor.InitEditor(); } catch (Exception ex) { Console.WriteLine($"InitEditor error: {ex}"); }
+                    spellEditor.Show();
                     break;
                 case GameObjectType.CraftTables:
-                    if (mCraftingTablesEditor == null || mCraftingTablesEditor.Visible == false)
-                    {
-                        mCraftingTablesEditor = new FrmCraftingTables();
-                        mCraftingTablesEditor.InitEditor();
-                        mCraftingTablesEditor.Show();
-                    }
-
+                    var craftTableEditor = new FrmCraftingTables();
+                    try { craftTableEditor.InitEditor(); } catch (Exception ex) { Console.WriteLine($"InitEditor error: {ex}"); }
+                    craftTableEditor.Show();
                     break;
                 case GameObjectType.Crafts:
-                    if (mCraftsEditor == null || mCraftsEditor.Visible == false)
-                    {
-                        mCraftsEditor = new FrmCrafts();
-                        mCraftsEditor.InitEditor();
-                        mCraftsEditor.Show();
-                    }
-
+                    var craftsEditor = new FrmCrafts();
+                    try { craftsEditor.InitEditor(); } catch (Exception ex) { Console.WriteLine($"InitEditor error: {ex}"); }
+                    craftsEditor.Show();
                     break;
                 case GameObjectType.Class:
-                    if (mClassEditor == null || mClassEditor.Visible == false)
-                    {
-                        mClassEditor = new FrmClass();
-                        mClassEditor.InitEditor();
-                        mClassEditor.Show();
-                    }
-
+                    var classEditor = new FrmClass();
+                    try { classEditor.InitEditor(); } catch (Exception ex) { Console.WriteLine($"InitEditor error: {ex}"); }
+                    classEditor.Show();
                     break;
                 case GameObjectType.Quest:
-                    if (mQuestEditor == null || mQuestEditor.Visible == false)
-                    {
-                        mQuestEditor = new FrmQuest();
-                        mQuestEditor.InitEditor();
-                        mQuestEditor.Show();
-                    }
-
+                    var questEditor = new FrmQuest();
+                    try { questEditor.InitEditor(); } catch (Exception ex) { Console.WriteLine($"InitEditor error: {ex}"); }
+                    questEditor.Show();
                     break;
                 case GameObjectType.Projectile:
-                    if (mProjectileEditor == null || mProjectileEditor.Visible == false)
-                    {
-                        mProjectileEditor = new FrmProjectile();
-                        mProjectileEditor.InitEditor();
-                        mProjectileEditor.Show();
-                    }
-
+                    var projEditor = new FrmProjectile();
+                    try { projEditor.InitEditor(); } catch (Exception ex) { Console.WriteLine($"InitEditor error: {ex}"); }
+                    projEditor.Show();
                     break;
                 case GameObjectType.Event:
-                    if (mCommonEventEditor == null || mCommonEventEditor.Visible == false)
-                    {
-                        mCommonEventEditor = new FrmCommonEvent();
-                        mCommonEventEditor.Show();
-                    }
-
+                    Console.WriteLine("Common event editor not yet available");
+                    Globals.CurrentEditor = -1;
                     break;
                 case GameObjectType.PlayerVariable:
-                    if (mSwitchVariableEditor == null || mSwitchVariableEditor.Visible == false)
-                    {
-                        mSwitchVariableEditor = new FrmSwitchVariable();
-                        mSwitchVariableEditor.InitEditor();
-                        mSwitchVariableEditor.Show();
-                    }
-
+                    var varEditor = new FrmSwitchVariable();
+                    try { varEditor.InitEditor(); } catch (Exception ex) { Console.WriteLine($"InitEditor error: {ex}"); }
+                    varEditor.Show();
                     break;
                 case GameObjectType.Shop:
-                    if (mShopEditor == null || mShopEditor.Visible == false)
-                    {
-                        mShopEditor = new FrmShop();
-                        mShopEditor.InitEditor();
-                        mShopEditor.Show();
-                    }
-
+                    var shopEditor = new FrmShop();
+                    try { shopEditor.InitEditor(); } catch (Exception ex) { Console.WriteLine($"InitEditor error: {ex}"); }
+                    shopEditor.Show();
                     break;
                 case GameObjectType.Time:
-                    if (mTimeEditor == null || mTimeEditor.Visible == false)
-                    {
-                        mTimeEditor = new FrmTime();
-                        mTimeEditor.InitEditor(DaylightCycleDescriptor.Instance);
-                        mTimeEditor.Show();
-                    }
-
+                    var timeEditor = new FrmTime();
+                    try { timeEditor.InitEditor(DaylightCycleDescriptor.Instance); } catch (Exception ex) { Console.WriteLine($"InitEditor error: {ex}"); }
+                    timeEditor.Show();
                     break;
-                default:
-                    return;
             }
-
-            Globals.CurrentEditor = (int)type;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error opening editor: {ex.Message}");
+            Globals.CurrentEditor = -1;
         }
     }
 
-    private void frmMain_FormClosing(object sender, FormClosingEventArgs e)
+    private void UpdateTimeSimulationList()
     {
-        if (!Globals.ClosingEditor &&
-            Globals.CurrentMap != null &&
-            Globals.CurrentMap.Changed() &&
-            DarkMessageBox.ShowWarning(
+        // Update time simulation dropdown
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (!Globals.ClosingEditor && Globals.CurrentMap?.Changed() == true)
+        {
+            var result = MessageBox.Show(
                 Strings.Mapping.maphaschangesdialog,
                 Strings.Mapping.mapnotsaved,
-                DarkDialogButton.YesNo,
-                Icon
-            ) ==
-            DialogResult.No)
-        {
-            e.Cancel = true;
-
-            return;
+                MessageBoxButtons.YesNo,
+                MessageBoxType.Warning
+            );
+            if (result == DialogResult.No)
+            {
+                e.Cancel = true;
+                return;
+            }
         }
-
         Globals.ClosingEditor = true;
+        base.OnClosing(e);
     }
 
-    private void toolStripBtnFlipVertical_Click(object sender, EventArgs e)
+    protected override void OnClosed(EventArgs e)
     {
-        Globals.MapEditorWindow.FlipVertical();
+        Networking.Network.EditorLidgrenNetwork?.Disconnect("Quitting");
+        base.OnClosed(e);
+        Application.Instance.Quit();
     }
-
-    private void toolStripBtnFlipHorizontal_Click(object sender, EventArgs e)
-    {
-        Globals.MapEditorWindow.FlipHorizontal();
-    }
-
-    private void packClientTexturesToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-
-    }
-
-    private void packAssets(string rootDirectory)
-    {
-        //TODO: Make packing heuristic that the texture packer class should use configurable.
-        var preferenceMusicPackSize = Preferences.LoadPreference("MusicPackSize");
-        var preferenceSoundPackSize = Preferences.LoadPreference("SoundPackSize");
-        var preferenceTexturePackSize = Preferences.LoadPreference("TexturePackSize");
-
-        if (!int.TryParse(preferenceMusicPackSize, out var musicPackSize))
-        {
-            _ = MessageBox.Show(
-                this,
-                Strings.Errors.UnableToParseInvalidIntegerFormat.ToString(preferenceMusicPackSize),
-                Strings.Errors.InvalidInputXCaption.ToString(Strings.Options.MusicPackSize),
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error
-            );
-            return;
-        }
-
-        if (!int.TryParse(preferenceSoundPackSize, out var soundPackSize))
-        {
-            _ = MessageBox.Show(
-                this,
-                Strings.Errors.UnableToParseInvalidIntegerFormat.ToString(preferenceSoundPackSize),
-                Strings.Errors.InvalidInputXCaption.ToString(Strings.Options.SoundPackSize),
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error
-            );
-            return;
-        }
-
-        if (!int.TryParse(preferenceTexturePackSize, out var texturePackSize))
-        {
-            _ = MessageBox.Show(
-                this,
-                Strings.Errors.UnableToParseInvalidIntegerFormat.ToString(preferenceTexturePackSize),
-                Strings.Errors.InvalidInputXCaption.ToString(Strings.Options.TextureSize),
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error
-            );
-            return;
-        }
-
-        var resourcesDirectory = Path.Combine(rootDirectory, "resources");
-        var packsDirectory = Path.Combine(resourcesDirectory, "packs");
-
-        //Delete Old Packs
-        Globals.PackingProgressForm.SetProgress(Strings.AssetPacking.deleting, 10, false);
-        Application.DoEvents();
-        if (Directory.Exists(packsDirectory))
-        {
-            var di = new DirectoryInfo(packsDirectory);
-
-            foreach (var file in di.GetFiles())
-            {
-                file.Delete();
-            }
-
-            foreach (var dir in di.GetDirectories())
-            {
-                dir.Delete(true);
-            }
-        }
-        else
-        {
-            Directory.CreateDirectory(packsDirectory);
-        }
-
-        //Create two 'sets' of graphics we want to pack. Tilesets + Fogs in one set, everything else in the other.
-        Globals.PackingProgressForm.SetProgress(Strings.AssetPacking.collecting, 20, false);
-        Application.DoEvents();
-        var toPack = new HashSet<Texture>();
-        foreach (var tex in GameContentManager.TilesetTextures)
-        {
-            toPack.Add(tex);
-        }
-
-        foreach (var tex in GameContentManager.FogTextures)
-        {
-            toPack.Add(tex);
-        }
-
-        foreach (var tex in GameContentManager.AllTextures)
-        {
-            if (!toPack.Contains(tex))
-            {
-                toPack.Add(tex);
-            }
-        }
-
-        Globals.PackingProgressForm.SetProgress(Strings.AssetPacking.calculating, 30, false);
-        Application.DoEvents();
-        var packs = new List<TexturePacker>();
-        while (toPack.Count > 0)
-        {
-            var tex = toPack.First();
-            var inserted = false;
-            toPack.Remove(tex);
-
-            foreach (var pack in packs)
-            {
-                if (pack.InsertTex(tex))
-                {
-                    inserted = true;
-
-                    break;
-                }
-            }
-
-            if (!inserted)
-            {
-                if (tex.GetWidth() > texturePackSize || tex.GetHeight() > texturePackSize)
-                {
-                    //Own texture
-                    var pack = new TexturePacker(resourcesDirectory, tex.GetWidth(), tex.GetHeight(), false);
-                    packs.Add(pack);
-                    pack.InsertTex(tex);
-                }
-                else
-                {
-                    var pack = new TexturePacker(resourcesDirectory, texturePackSize, texturePackSize, true);
-                    packs.Add(pack);
-                    if (!pack.InsertTex(tex))
-                    {
-                        throw new Exception("This shouldn't happen!");
-                    }
-                }
-            }
-        }
-
-        Globals.PackingProgressForm.SetProgress(Strings.AssetPacking.exporting, 40, false);
-        Application.DoEvents();
-        var packIndex = 0;
-        foreach (var pack in packs)
-        {
-            pack.Export(packIndex);
-            packIndex++;
-        }
-
-        // Package up sounds!
-        Globals.PackingProgressForm.SetProgress(Strings.AssetPacking.sounds, 80, false);
-        Application.DoEvents();
-        AssetPacker.PackageAssets(
-            Path.Combine(resourcesDirectory, "sounds"),
-            "*.wav",
-            packsDirectory,
-            "sound.index",
-            "sound",
-            ".asset",
-            soundPackSize
-        );
-
-        // Package up music!
-        Globals.PackingProgressForm.SetProgress(Strings.AssetPacking.music, 90, false);
-        Application.DoEvents();
-        AssetPacker.PackageAssets(
-            Path.Combine(resourcesDirectory, "music"),
-            "*.ogg",
-            packsDirectory,
-            "music.index",
-            "music",
-            ".asset",
-            musicPackSize
-        );
-
-        Globals.PackingProgressForm.SetProgress(Strings.AssetPacking.done, 100, false);
-        Application.DoEvents();
-        Thread.Sleep(1000);
-
-        Globals.PackingProgressForm.NotifyClose();
-    }
-
-    private string SelectDirectoryWithRetry(string description, string initialPath, bool showNewFolderButton)
-    {
-        var attempts = 0;
-        while (attempts < 2)
-        {
-            using (var folderBrowserDialog = new FolderBrowserDialog()
-                   {
-                       Description = description,
-                       SelectedPath = initialPath,
-                       ShowNewFolderButton = showNewFolderButton,
-                   })
-            {
-                var selectionDialogResult = folderBrowserDialog.ShowDialog();
-                switch (selectionDialogResult)
-                {
-                    case DialogResult.OK:
-                        var selectedPath = folderBrowserDialog.SelectedPath;
-                        if (string.IsNullOrWhiteSpace(selectedPath) || !Directory.Exists(selectedPath))
-                        {
-                            var retryDialogueResult = DarkMessageBox.ShowError(
-                                Strings.Errors.InvalidDirectory,
-                                Strings.Errors.InvalidDirectoryCaption,
-                                DarkDialogButton.RetryCancel,
-                                Icon
-                            );
-
-                            switch (retryDialogueResult)
-                            {
-                                case DialogResult.Retry:
-                                    break;
-
-                                case DialogResult.Cancel:
-                                    return default;
-                            }
-
-                            break;
-                        }
-
-                        return selectedPath;
-
-                    case DialogResult.Cancel:
-                        return default;
-
-                    case DialogResult.None:
-                    case DialogResult.Abort:
-                    case DialogResult.Retry:
-                    case DialogResult.Ignore:
-                    case DialogResult.Yes:
-                    case DialogResult.No:
-                        throw new NotImplementedException(
-                            $"No handler defined for {selectionDialogResult}, should be {DialogResult.OK} or {DialogResult.Cancel}."
-                        );
-
-                    default:
-                        throw new IndexOutOfRangeException(
-                            $"{selectionDialogResult} is not a valid {nameof(System.Windows.Forms.DialogResult)}."
-                        );
-                }
-            }
-        }
-
-        return default;
-    }
-
-    private void packageUpdateToolStripMenuItem_Click(object sender, EventArgs e) => PackageUpdate();
-
-    private void PackageUpdate()
-    {
-        var lastSourceDirectory = Preferences.LoadPreference("update_sourceDirectory");
-        var lastTargetDirectory = Preferences.LoadPreference("update_targetDirectory");
-
-        var sourceDirectory = SelectDirectoryWithRetry(
-            Strings.UpdatePacking.SourceDirectoryPromptDescription,
-            string.IsNullOrWhiteSpace(lastSourceDirectory) ? Environment.CurrentDirectory : lastSourceDirectory,
-            false
-        );
-        if (sourceDirectory == default)
-        {
-            return;
-        }
-
-        var targetDirectory = SelectDirectoryWithRetry(
-            Strings.UpdatePacking.TargetDirectoryPromptDescription,
-            string.IsNullOrWhiteSpace(lastTargetDirectory) ? Environment.CurrentDirectory : lastTargetDirectory,
-            true
-        );
-        if (targetDirectory == default)
-        {
-            return;
-        }
-
-        Preferences.SavePreference("update_sourceDirectory", sourceDirectory);
-        Preferences.SavePreference("update_targetDirectory", targetDirectory);
-
-        var baseDir = new Uri($@"{sourceDirectory}\");
-        var selectedDir = new Uri($@"{targetDirectory}\");
-
-        if (baseDir.IsBaseOf(selectedDir))
-        {
-            // Error, cannot be put within editor folder else it would try to include itself?
-            _ = DarkMessageBox.ShowError(
-                Strings.UpdatePacking.InvalidBase,
-                Strings.UpdatePacking.Error,
-                DarkDialogButton.Ok,
-                Icon
-            );
-            return;
-        }
-
-        UpdateManifest? existingUpdate = default;
-        var targetUpdateFile = Path.Combine(targetDirectory, "update.json");
-        if (File.Exists(targetUpdateFile))
-        {
-            //Existing update! Offer to create a differential folder where the only files within will be those that have changed
-            if (DarkMessageBox.ShowError(
-                    Strings.UpdatePacking.Differential,
-                    Strings.UpdatePacking.DifferentialTitle,
-                    DarkDialogButton.YesNo,
-                    Icon
-                ) ==
-                DialogResult.Yes)
-            {
-                var updateManifestRaw = File.ReadAllText(targetUpdateFile);
-                existingUpdate = JsonConvert.DeserializeObject<UpdateManifest>(updateManifestRaw);
-            }
-        }
-        else if (Directory.EnumerateFileSystemEntries(targetDirectory).Any())
-        {
-            //Folder must be empty!
-            _ = DarkMessageBox.ShowError(
-                Strings.UpdatePacking.Empty,
-                Strings.UpdatePacking.Error,
-                DarkDialogButton.Ok,
-                Icon
-            );
-            return;
-        }
-
-        // Are we configured to package up our assets for an update?
-        var packageUpdateAssets = Preferences.LoadPreference("PackageUpdateAssets");
-        if (!string.IsNullOrWhiteSpace(packageUpdateAssets) &&
-            Convert.ToBoolean(packageUpdateAssets, CultureInfo.InvariantCulture))
-        {
-            Globals.PackingProgressForm = new FrmProgress();
-            Globals.PackingProgressForm.SetTitle(Strings.AssetPacking.title);
-            var assetThread = new Thread(() => packAssets(sourceDirectory));
-            assetThread.Start();
-            _ = Globals.PackingProgressForm.ShowDialog();
-        }
-
-        Globals.UpdateCreationProgressForm = new FrmProgress();
-        Globals.UpdateCreationProgressForm.SetTitle(Strings.UpdatePacking.Title);
-        Globals.UpdateCreationProgressForm.SetProgress(Strings.UpdatePacking.Deleting, 10, false);
-        var packingthread = new Thread(() => createUpdate(sourceDirectory, targetDirectory, existingUpdate));
-        packingthread.Start();
-        _ = Globals.UpdateCreationProgressForm.ShowDialog();
-    }
-
-    private void createUpdate(string sourceDirectory, string targetDirectory, UpdateManifest? existingUpdate)
-    {
-        DirectoryInfo targetDirectoryInfo = new(targetDirectory);
-        if (!targetDirectoryInfo.Exists)
-        {
-            targetDirectoryInfo.Create();
-        }
-
-        if (!targetDirectoryInfo.Exists)
-        {
-            return;
-        }
-
-        foreach (FileInfo targetFileInfo in targetDirectoryInfo.GetFiles())
-        {
-            targetFileInfo.Delete();
-        }
-
-        foreach (DirectoryInfo targetSubdirectoryInfo in targetDirectoryInfo.GetDirectories())
-        {
-            targetSubdirectoryInfo.Delete(true);
-        }
-
-        // Intersect excluded files
-        var editorBaseName = Process.GetCurrentProcess().ProcessName.ToLowerInvariant();
-        var editorFileNameExe = $"{editorBaseName}.exe";
-        var editorFileNamePdb = $"{editorBaseName}.pdb";
-        string[] excludeFiles =
-        [
-            "resources/mapcache.db",
-            "update.json",
-            "version.json",
-            "version.client.json",
-            "version.editor.json",
-            ".gitkeep",
-        ];
-        List<string> clientExcludeFiles =
-        [
-            editorFileNameExe,
-            editorFileNamePdb,
-            "resources/editor_strings.json",
-        ];
-        List<string> clientExcludeDirectories =
-        [
-            "resources/cursors",
-        ];
-        List<string> editorExcludeFiles =
-        [
-            "resources/client_strings.json",
-        ];
-        List<string> editorExcludeDirectories =
-        [
-            "resources/packs",
-        ];
-        string[] excludeExtensions =
-        [
-            ".dll",
-            ".xml",
-            ".config",
-            ".php",
-        ];
-        string[] excludeDirectories =
-        [
-            "logs",
-            "screenshots",
-        ];
-
-        const string resourcesDirectoryName = "resources";
-        var pathToResourcesDirectory = Path.Combine(sourceDirectory, resourcesDirectoryName);
-        var pathToPacksDirectory = Path.Combine(pathToResourcesDirectory, "packs");
-        if (Directory.Exists(pathToPacksDirectory))
-        {
-            var packFileNames = Directory.GetFiles(pathToPacksDirectory, "*.meta");
-            editorExcludeFiles.AddRange(packFileNames);
-            clientExcludeFiles.AddRange(
-                packFileNames.Select(
-                        pack =>
-                        {
-                            var tokenPack = JToken.Parse(GzipCompression.ReadDecompressedString(pack));
-                            if (tokenPack is not JObject objectPack)
-                            {
-                                return null;
-                            }
-
-                            return objectPack.TryGetValue("frames", out var tokenFrames) ? tokenFrames : null;
-                        }
-                    )
-                    .SelectMany(
-                        token => token?.Children() ?? [],
-                        (_, frameToken) =>
-                            frameToken is JObject frameObject &&
-                            frameObject.TryGetValue("filename", out var tokenFilename)
-                                ? tokenFilename.Value<string>()
-                                : null
-                    )
-                    .Where(filename => !string.IsNullOrWhiteSpace(filename))
-                    .OfType<string>()
-            );
-
-            var soundIndex = Path.Combine(pathToPacksDirectory, "sound.index");
-            if (File.Exists(soundIndex))
-            {
-                editorExcludeFiles.Add(soundIndex);
-                using AssetPacker soundPacker = new(soundIndex, pathToPacksDirectory);
-                editorExcludeFiles.AddRange(
-                    soundPacker.CachedPackages.Select(
-                        cachedPackage => Path.Combine(soundPacker.PackageLocation, cachedPackage)
-                    )
-                );
-
-                clientExcludeFiles.AddRange(
-                    soundPacker.FileList.Select(
-                        sound => Path.Combine(
-                                resourcesDirectoryName,
-                                "sounds",
-                                sound.ToLower(CultureInfo.CurrentCulture)
-                            )
-                            .Replace('\\', '/')
-                    )
-                );
-            }
-
-            var musicIndex = Path.Combine(pathToPacksDirectory, "music.index");
-            if (File.Exists(musicIndex))
-            {
-                editorExcludeFiles.Add(musicIndex);
-                using AssetPacker musicPacker = new(musicIndex, pathToPacksDirectory);
-                editorExcludeFiles.AddRange(
-                    musicPacker.CachedPackages.Select(
-                        cachedPackage => Path.Combine(musicPacker.PackageLocation, cachedPackage)
-                    )
-                );
-
-                clientExcludeFiles.AddRange(
-                    musicPacker.FileList.Select(
-                        music => Path.Combine(
-                                resourcesDirectoryName,
-                                "music",
-                                music.ToLower(CultureInfo.CurrentCulture)
-                            )
-                            .Replace('\\', '/')
-                    )
-                );
-            }
-
-        }
-
-        var fileCount = Directory.GetFiles(Directory.GetCurrentDirectory(), "*.*", SearchOption.AllDirectories).Length;
-
-        var update = new UpdateManifest();
-        QueryFilesForUpdate(
-            update: update,
-            excludeFiles: excludeFiles,
-            clientExcludeDirectories: clientExcludeDirectories.ToHashSet(),
-            clientExcludeFiles: clientExcludeFiles.ToHashSet(),
-            editorExcludeDirectories: editorExcludeDirectories.ToHashSet(),
-            editorExcludeFiles: editorExcludeFiles.ToHashSet(),
-            excludeExtensions: excludeExtensions.ToHashSet(),
-            excludeDirectories: excludeDirectories.ToHashSet(),
-            workingDirectory: sourceDirectory,
-            sourcePath: sourceDirectory,
-            currentSourcePath: sourceDirectory,
-            targetPath: targetDirectory,
-            filesProcessed: 0,
-            fileCount: fileCount,
-            existingUpdate: existingUpdate
-        );
-    }
-
-    private static int QueryFilesForUpdate(
-        UpdateManifest update,
-        string[] excludeFiles,
-        HashSet<string> clientExcludeDirectories,
-        HashSet<string> clientExcludeFiles,
-        HashSet<string> editorExcludeDirectories,
-        HashSet<string> editorExcludeFiles,
-        HashSet<string> excludeExtensions,
-        HashSet<string> excludeDirectories,
-        string workingDirectory,
-        string sourcePath,
-        string currentSourcePath,
-        string targetPath,
-        int filesProcessed,
-        int fileCount,
-        UpdateManifest? existingUpdate
-    )
-    {
-        DirectoryInfo directoryInfo = new(currentSourcePath);
-        Uri workingDir = new(workingDirectory + "/");
-
-        var fileInfos = directoryInfo.GetFiles();
-        foreach (var fileInfo in fileInfos)
-        {
-            var relativePath = Uri.UnescapeDataString(
-                workingDir.MakeRelativeUri(new Uri(Path.Combine(currentSourcePath, fileInfo.Name)))
-                    .ToString()
-                    .Replace('\\', '/')
-            );
-            var relativeDirectoryPath = Uri.UnescapeDataString(
-                workingDir.MakeRelativeUri(new Uri(Path.Combine(currentSourcePath, fileInfo.DirectoryName ?? string.Empty)))
-                    .ToString()
-                    .Replace('\\', '/')
-            );
-            if (!clientExcludeDirectories.Contains(relativeDirectoryPath) &&
-                !excludeFiles.Contains(relativePath) &&
-                !excludeExtensions.Contains(fileInfo.Extension) &&
-                !clientExcludeFiles.Contains(relativePath.ToLower(CultureInfo.CurrentCulture)))
-            {
-                var checksum = UpdateManifestFile.ComputeChecksum(fileInfo);
-
-                UpdateManifestFile updateFile = new(relativePath, checksum, fileInfo.Length);
-                update.Files.Add(updateFile);
-
-                //Copy File (If not in existing update)
-                var existingFile = existingUpdate?.Files.FirstOrDefault(f => f.Path == updateFile.Path);
-
-                if (existingFile == null ||
-                    existingFile.Size != updateFile.Size ||
-                    existingFile.Checksum != updateFile.Checksum)
-                {
-                    var relativeFolder = Uri.UnescapeDataString(
-                        workingDir.MakeRelativeUri(new Uri(currentSourcePath + "/")).ToString().Replace('\\', '/')
-                    );
-                    if (!string.IsNullOrEmpty(relativeFolder))
-                    {
-                        var pathToRelativeDirectory =
-                            Directory.CreateDirectory(Path.Combine(targetPath, relativeFolder));
-                        File.Copy(fileInfo.FullName, Path.Combine(pathToRelativeDirectory.FullName, fileInfo.Name));
-                    }
-                    else
-                    {
-                        File.Copy(fileInfo.FullName, Path.Combine(targetPath, fileInfo.Name));
-                    }
-                }
-            }
-
-            filesProcessed++;
-
-            var percentage = filesProcessed / (float)(fileCount + 1);
-            var fakePercentage = (int)(percentage * 80f);
-
-            Globals.UpdateCreationProgressForm.SetProgress(
-                Strings.UpdatePacking.Calculating,
-                fakePercentage + 10,
-                false
-            );
-
-            Application.DoEvents();
-        }
-
-        foreach (var subdirectory in directoryInfo.GetDirectories())
-        {
-            var relativePath = Uri.UnescapeDataString(
-                workingDir.MakeRelativeUri(new Uri(Path.Combine(currentSourcePath, subdirectory.Name)))
-                    .ToString()
-                    .Replace('\\', '/')
-            );
-            if (excludeDirectories.Contains(relativePath))
-            {
-                continue;
-            }
-
-            filesProcessed = QueryFilesForUpdate(
-                update: update,
-                excludeFiles: excludeFiles,
-                clientExcludeDirectories: clientExcludeDirectories,
-                clientExcludeFiles: clientExcludeFiles,
-                editorExcludeDirectories: editorExcludeDirectories,
-                editorExcludeFiles: editorExcludeFiles,
-                excludeExtensions: excludeExtensions,
-                excludeDirectories: excludeDirectories,
-                workingDirectory: workingDirectory,
-                sourcePath: sourcePath,
-                currentSourcePath: Path.Combine(currentSourcePath, subdirectory.Name),
-                targetPath: targetPath,
-                filesProcessed: filesProcessed,
-                fileCount: fileCount,
-                existingUpdate: existingUpdate
-            );
-        }
-
-        if (!string.Equals(sourcePath, currentSourcePath, StringComparison.Ordinal))
-        {
-            return filesProcessed;
-        }
-
-        Globals.UpdateCreationProgressForm.SetProgress(Strings.UpdatePacking.Done, 100, false);
-        Application.DoEvents();
-        Thread.Sleep(1000);
-
-        //TODO: Open folder with update files
-        var targetJsonPath = Path.Combine(targetPath, "update.json");
-        File.WriteAllText(
-            targetJsonPath,
-            JsonConvert.SerializeObject(
-                update,
-                Formatting.Indented,
-                new JsonSerializerSettings
-                {
-                    DefaultValueHandling = DefaultValueHandling.Ignore
-                }
-            )
-        );
-
-        Globals.UpdateCreationProgressForm.NotifyClose();
-
-        return filesProcessed;
-    }
-
+}
+
+// Stub for FrmSwitchVariable if not defined elsewhere
+public class FrmSwitchVariable : Form
+{
+    public void InitEditor() { }
 }

@@ -1,6 +1,4 @@
 using Intersect.Editor.Forms;
-using Intersect.Editor.Forms.DockingElements;
-using Intersect.Editor.Forms.Editors;
 using Intersect.Editor.Localization;
 using Intersect.Editor.Maps;
 using Intersect.Enums;
@@ -99,6 +97,7 @@ public static partial class Globals
     public static bool HasGameData { get; set; } = false;
 
     public static bool InEditor;
+    public static bool EditorLoopStarted;
 
     public static bool IsPaste;
 
@@ -108,20 +107,22 @@ public static partial class Globals
 
     public static FrmLogin? LoginForm;
 
-    public static FrmMain? MainForm;
+    public static dynamic? MainForm;
 
-    public static FrmMapEditor MapEditorWindow;
+    public static Action<Intersect.Enums.GameObjectType>? OpenEditorDelegate;
 
-    public static MapGrid MapGrid;
+    public static dynamic? MapEditorWindow;
 
-    public static FrmMapGrid MapGridWindowNew;
+    public static dynamic? MapGrid;
+
+    public static dynamic? MapGridWindowNew;
 
     //Docking Window References
-    public static FrmMapLayers MapLayersWindow;
+    public static dynamic? MapLayersWindow;
 
-    public static FrmMapList MapListWindow;
+    public static dynamic? MapListWindow;
 
-    public static FrmMapProperties MapPropertiesWindow;
+    public static dynamic? MapPropertiesWindow;
 
     public static List<Guid> MapsToFetch;
 
@@ -135,11 +136,11 @@ public static partial class Globals
 
     public static int MyIndex;
 
-    public static FrmProgress PackingProgressForm;
+    public static dynamic? PackingProgressForm;
 
-    public static FrmProgress PreviewProgressForm;
+    public static dynamic? PreviewProgressForm;
 
-    public static FrmProgress UpdateCreationProgressForm;
+    public static dynamic? UpdateCreationProgressForm;
 
     //Network Variables
     public static int ReconnectTime = 3000;
@@ -147,7 +148,7 @@ public static partial class Globals
     public static long NextServerStatusPing { get; set; }
 
     //Game Object Editors
-    public static FrmResource ResourceEditor;
+    public static dynamic? ResourceEditor;
 
     public static EditingTool SavedTool = EditingTool.Brush;
 

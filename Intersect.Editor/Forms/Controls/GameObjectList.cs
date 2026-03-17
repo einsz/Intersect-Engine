@@ -1,6 +1,9 @@
+using Eto.Forms;
+using Eto.Drawing;
+
 namespace Intersect.Editor.Forms.Controls;
 
-public partial class GameObjectList : TreeView
+public partial class GameObjectList : TreeGridView
 {
     private bool mChangingName = false;
 
@@ -26,29 +29,40 @@ public partial class GameObjectList : TreeView
 
     private List<string> mExpandedFolders = new List<string>();
 
-
     public GameObjectList()
     {
-        InitializeComponent();
+        ShowHeader = false;
+        AllowMultipleSelection = false;
 
-        ImageList = imageList;
+        var nameColumn = new GridColumn
+        {
+            HeaderText = "Name",
+            DataCell = new TextBoxCell(0),
+            AutoSize = true,
+            Editable = false,
+            Expand = true
+        };
 
-        AfterSelect += GameObjectList_AfterSelect;
+        Columns.Add(nameColumn);
+        DataStore = new TreeGridItemCollection();
 
-        NodeMouseClick += GameObjectList_NodeMouseClick;
-
+        SelectionChanged += GameObjectList_AfterSelect;
+        MouseDown += GameObjectList_MouseDown;
         GotFocus += GameObjectList_GotFocus;
-
         LostFocus += GameObjectList_LostFocus;
-
         KeyDown += GameObjectList_KeyDown;
     }
 
-    /// <summary>
-    /// Sets up this game object list for working with our editor
-    /// </summary>
-    public void Init(UpdateToolstripDelegate updateToolStripHandler, UpdateItemDelegate updateItemHandler, ToolstripButtonClickDelegate newDelegate, 
-        ToolstripButtonClickDelegate copyDelegate, ToolstripButtonClickDelegate undoDelegate, ToolstripButtonClickDelegate pasteDelegate, ToolstripButtonClickDelegate deleteDelegate)
+    public new TreeGridItem SelectedItem => base.SelectedItem as TreeGridItem;
+
+    public void Init(
+        UpdateToolstripDelegate updateToolStripHandler,
+        UpdateItemDelegate updateItemHandler,
+        ToolstripButtonClickDelegate newDelegate,
+        ToolstripButtonClickDelegate copyDelegate,
+        ToolstripButtonClickDelegate undoDelegate,
+        ToolstripButtonClickDelegate pasteDelegate,
+        ToolstripButtonClickDelegate deleteDelegate)
     {
         FocusChangedHandler = updateToolStripHandler;
         UpdateItemHandler = updateItemHandler;
@@ -59,83 +73,63 @@ public partial class GameObjectList : TreeView
         ToolStripItemDelete_Click = deleteDelegate;
     }
 
-    /// <summary>
-    /// This function copies item ids to clipboards if right clicking. Otherwise it handles expanding/closing folders
-    /// </summary>
-    /// <param name="sender"></param>
-    /// <param name="e"></param>
-    private void GameObjectList_NodeMouseClick(object sender, TreeNodeMouseClickEventArgs e)
+    private void GameObjectList_MouseDown(object sender, MouseEventArgs e)
     {
-        var node = e.Node;
-        if (node != null)
+        if (e.Buttons == MouseButtons.Alternate)
         {
-            if (e.Button == MouseButtons.Right)
+            var node = SelectedItem;
+            if (node?.Tag is Guid guid)
             {
-                if (e.Node.Tag != null && e.Node.Tag is Guid)
-                {
-                    Clipboard.SetText(e.Node.Tag.ToString());
-                }
+                var clipboard = new Clipboard();
+                clipboard.Text = guid.ToString();
             }
+        }
 
-            var hitTest = HitTest(e.Location);
-            if (hitTest.Location != TreeViewHitTestLocations.PlusMinus)
+        var selected = SelectedItem;
+        if (selected != null)
+        {
+            if (selected.Expanded)
             {
-                if (node.Nodes.Count > 0)
+                if (!mExpandedFolders.Contains(selected.Values?.FirstOrDefault()?.ToString()))
                 {
-                    if (node.IsExpanded)
+                    var text = selected.Values?.FirstOrDefault()?.ToString();
+                    if (!string.IsNullOrEmpty(text))
                     {
-                        node.Collapse();
+                        mExpandedFolders.Add(text);
                     }
-                    else
-                    {
-                        node.Expand();
-                    }
-                }
-            }
-
-            if (node.IsExpanded)
-            {
-                if (!mExpandedFolders.Contains(node.Text))
-                {
-                    mExpandedFolders.Add(node.Text);
                 }
             }
             else
             {
-                if (mExpandedFolders.Contains(node.Text))
+                var text = selected.Values?.FirstOrDefault()?.ToString();
+                if (!string.IsNullOrEmpty(text) && mExpandedFolders.Contains(text))
                 {
-                    mExpandedFolders.Remove(node.Text);
+                    mExpandedFolders.Remove(text);
                 }
             }
         }
     }
 
-    /// <summary>
-    /// This function tells our editor that we selected a new item to edit
-    /// </summary>
-    /// <param name="sender"></param>
-    /// <param name="e"></param>
-    private void GameObjectList_AfterSelect(object sender, TreeViewEventArgs e)
+    private void GameObjectList_AfterSelect(object sender, EventArgs e)
     {
         if (mChangingName)
         {
             return;
         }
 
-        if (SelectedNode == null || SelectedNode.Tag == null)
+        var selected = SelectedItem;
+        if (selected == null || selected.Tag == null)
         {
             return;
         }
 
-        UpdateItemHandler?.Invoke((Guid)SelectedNode.Tag);
+        UpdateItemHandler?.Invoke((Guid)selected.Tag);
     }
-
 
     private void GameObjectList_LostFocus(object sender, EventArgs e)
     {
         FocusChangedHandler?.Invoke();
     }
-
 
     private void GameObjectList_GotFocus(object sender, EventArgs e)
     {
@@ -144,49 +138,51 @@ public partial class GameObjectList : TreeView
 
     private void GameObjectList_KeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Control)
+        if (e.Modifiers == Keys.Control)
         {
-            if (e.KeyCode == Keys.Z)
+            if (e.Key == Keys.Z)
             {
                 ToolStripItemUndo_Click?.Invoke(null, null);
             }
-            else if (e.KeyCode == Keys.V)
+            else if (e.Key == Keys.V)
             {
                 ToolStripItemPaste_Click?.Invoke(null, null);
             }
-            else if (e.KeyCode == Keys.C)
+            else if (e.Key == Keys.C)
             {
                 ToolStripItemCopy_Click?.Invoke(null, null);
             }
         }
         else
         {
-            if (e.KeyCode == Keys.Delete)
+            if (e.Key == Keys.Delete)
             {
                 ToolStripItemDelete_Click?.Invoke(null, null);
             }
         }
     }
 
-
-    /// <summary>
-    /// Updates the name of the currently selected node
-    /// </summary>
-    /// <param name="text">New name</param>
     public void UpdateText(string text)
     {
         mChangingName = true;
-        if (SelectedNode != null)
+        var selected = SelectedItem;
+        if (selected != null)
         {
-            SelectedNode.Text = text;
+            if (selected.Values != null && selected.Values.Length > 0)
+            {
+                selected.Values[0] = text;
+            }
         }
+
         mChangingName = false;
     }
 
-
     public void ExpandFolder(string name)
     {
-        mExpandedFolders.Add(name);
+        if (!mExpandedFolders.Contains(name))
+        {
+            mExpandedFolders.Add(name);
+        }
     }
 
     public void ClearExpandedFolders()
@@ -194,49 +190,52 @@ public partial class GameObjectList : TreeView
         mExpandedFolders.Clear();
     }
 
-    public void Repopulate(KeyValuePair<Guid, KeyValuePair<string, string>>[] items, List<string> folders, bool chronological, bool customSearch, string search)
+    public void Repopulate(
+        KeyValuePair<Guid, KeyValuePair<string, string>>[] items,
+        List<string> folders,
+        bool chronological,
+        bool customSearch,
+        string search)
     {
         var selectedId = Guid.Empty;
-        var folderNodes = new Dictionary<string, TreeNode>();
-        if (SelectedNode != null && SelectedNode.Tag != null)
+        var folderNodes = new Dictionary<string, TreeGridItem>();
+
+        var selected = SelectedItem;
+        if (selected?.Tag is Guid tag)
         {
-            selectedId = (Guid)SelectedNode.Tag;
+            selectedId = tag;
         }
 
-        Nodes.Clear();
+        var collection = new TreeGridItemCollection();
 
-        Sorted = chronological;
-
-        var nodes = new List<TreeNode>();
-        TreeNode selectNode = null;
+        var nodes = new List<TreeGridItem>();
+        TreeGridItem selectNode = null;
 
         if (!chronological && !customSearch)
         {
             foreach (var folder in folders)
             {
-                var node = new TreeNode(folder);
-                node.ImageIndex = 0;
-                node.SelectedImageIndex = 0;
-                folderNodes.Add(folder, node);
+                var node = new TreeGridItem(folder);
+                folderNodes[folder] = node;
                 nodes.Add(node);
             }
         }
 
         foreach (var itm in items)
         {
-            var node = new TreeNode(itm.Value.Key);
+            var node = new TreeGridItem(itm.Value.Key);
             node.Tag = itm.Key;
-            node.ImageIndex = 1;
-            node.SelectedImageIndex = 1;
 
             var folder = itm.Value.Value;
             if (!string.IsNullOrEmpty(folder) && !chronological && !customSearch)
             {
-                var folderNode = folderNodes[folder];
-                folderNode.Nodes.Add(node);
-                if (itm.Key == selectedId)
+                if (folderNodes.TryGetValue(folder, out var folderNode))
                 {
-                    folderNode.Expand();
+                    folderNode.Children.Add(node);
+                    if (itm.Key == selectedId)
+                    {
+                        folderNode.Expanded = true;
+                    }
                 }
             }
             else
@@ -246,7 +245,8 @@ public partial class GameObjectList : TreeView
 
             if (customSearch)
             {
-                if (!node.Text.ToLower().Contains(search.ToLower()))
+                var nodeText = node.Values?.FirstOrDefault()?.ToString() ?? "";
+                if (!nodeText.ToLower().Contains(search?.ToLower() ?? ""))
                 {
                     nodes.Remove(node);
                 }
@@ -258,19 +258,33 @@ public partial class GameObjectList : TreeView
             }
         }
 
-        foreach (var node in mExpandedFolders)
+        foreach (var folderName in mExpandedFolders)
         {
-            if (folderNodes.ContainsKey(node))
+            if (folderNodes.ContainsKey(folderName))
             {
-                folderNodes[node].Expand();
+                folderNodes[folderName].Expanded = true;
             }
         }
 
-        Nodes.AddRange(nodes.ToArray());
+        foreach (var node in nodes)
+        {
+            collection.Add(node);
+        }
+
+        if (chronological)
+        {
+            DataStore = new TreeGridItemCollection(
+                collection.OrderBy(n => n.Values?.FirstOrDefault()?.ToString() ?? "").Cast<TreeGridItem>()
+            );
+        }
+        else
+        {
+            DataStore = collection;
+        }
 
         if (selectNode != null)
         {
-            SelectedNode = selectNode;
+            SelectedItem = selectNode;
         }
     }
 }

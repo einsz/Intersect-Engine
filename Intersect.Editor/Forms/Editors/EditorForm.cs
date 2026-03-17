@@ -1,24 +1,24 @@
-using DarkUI.Controls;
+using Eto.Forms;
+using Eto.Drawing;
 using Intersect.Editor.Core;
 using Intersect.Editor.Networking;
 using Intersect.Enums;
 using Microsoft.Extensions.Logging;
 
-
 namespace Intersect.Editor.Forms.Editors;
-
 
 public partial class EditorForm : Form
 {
-
     private bool mClosing = false;
 
-    protected DarkButton? _btnSave;
-    protected DarkButton? _btnCancel;
+    protected Button? _btnSave;
+    protected Button? _btnCancel;
 
     protected EditorForm()
     {
-        Icon = Program.Icon;
+        Title = "Editor";
+        MinimumSize = new Size(800, 600);
+        Size = new Size(1024, 768);
 
         ApplyHooks();
     }
@@ -27,25 +27,14 @@ public partial class EditorForm : Form
     {
         PacketHandler.GameObjectUpdatedDelegate = type =>
         {
-            if (IsDisposed || mClosing || Disposing)
+            if (mClosing)
             {
                 return;
             }
 
-            var action = (Action<GameObjectType>) FireGameObjectUpdatedDelegate;
             try
             {
-                if (!this.Disposing && !this.IsDisposed)
-                {
-                    if (InvokeRequired)
-                    {
-                        Invoke(action, type);
-                    }
-                    else
-                    {
-                        action(type);
-                    }
-                }
+                Application.Instance.Invoke(() => GameObjectUpdatedDelegate(type));
             }
             catch (Exception e)
             {
@@ -53,17 +42,17 @@ public partial class EditorForm : Form
             }
         };
 
-        this.Closing += EditorForm_Closing;
+        this.Closed += EditorForm_Closed;
     }
 
-    private void EditorForm_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+    private void EditorForm_Closed(object? sender, EventArgs e)
     {
         mClosing = true;
     }
 
     private void FireGameObjectUpdatedDelegate(GameObjectType type)
     {
-        if (IsDisposed || mClosing || Disposing)
+        if (mClosing)
         {
             return;
         }
@@ -73,18 +62,6 @@ public partial class EditorForm : Form
 
     protected virtual void GameObjectUpdatedDelegate(GameObjectType type)
     {
-    }
-
-    private void InitializeComponent()
-    {
-        this.SuspendLayout();
-        //
-        // EditorForm
-        //
-        this.ClientSize = new System.Drawing.Size(284, 261);
-        this.Name = "EditorForm";
-        this.ResumeLayout(false);
-
     }
 
     protected void UpdateEditorButtons(bool isItemSelected)

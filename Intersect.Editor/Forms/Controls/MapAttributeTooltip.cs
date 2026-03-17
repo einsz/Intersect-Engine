@@ -1,21 +1,28 @@
+using Eto.Forms;
+using Eto.Drawing;
 using Intersect.Editor.Localization;
 using Intersect.Framework.Core.GameObjects.Maps;
 
 namespace Intersect.Editor.Forms.Controls;
 
-public partial class MapAttributeTooltip : FlowLayoutPanel
+public partial class MapAttributeTooltip : Panel
 {
     private readonly object _mapAttributeLock = new object();
     private MapAttribute _mapAttribute;
+    private DynamicLayout pnlContents;
 
     public MapAttributeTooltip()
     {
-        InitializeComponent();
+        pnlContents = new DynamicLayout
+        {
+            Padding = new Padding(5),
+            DefaultSpacing = new Size(5, 2)
+        };
 
-        AutoSize = true;
-        AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        BorderStyle = BorderStyle.FixedSingle;
-        FlowDirection = FlowDirection.TopDown;
+        Content = pnlContents;
+        BackgroundColor = new Color(0.2f, 0.2f, 0.2f, 0.95f);
+        Border = BorderType.Line;
+        Visible = false;
     }
 
     public MapAttribute MapAttribute
@@ -37,20 +44,19 @@ public partial class MapAttributeTooltip : FlowLayoutPanel
         }
     }
 
-    private static Label CreateLabel(AnchorStyles anchor = AnchorStyles.Left, FontStyle fontStyle = FontStyle.Regular)
+    private static Label CreateLabel(bool bold = false)
     {
+        var font = bold ? new Font(SystemFont.Bold) : new Font(SystemFont.Default);
         return new Label
         {
-            Anchor = anchor,
-            AutoSize = true,
-            Font = new Font(SystemFonts.DefaultFont, fontStyle),
-            ForeColor = System.Drawing.Color.White,
+            TextColor = Colors.White,
+            Font = font
         };
     }
 
     protected virtual void OnAttributeChanged(Type oldType)
     {
-        Hide();
+        Visible = false;
 
         if (_mapAttribute == null)
         {
@@ -63,36 +69,25 @@ public partial class MapAttributeTooltip : FlowLayoutPanel
             return;
         }
 
-        if (localizedProperties.Count < pnlContents.RowCount)
+        pnlContents = new DynamicLayout
         {
-            for (var rowIndex = pnlContents.RowCount - 1; rowIndex >= localizedProperties.Count; rowIndex--)
-            {
-                for (var columnIndex = 1; columnIndex >= 0; columnIndex--)
-                {
-                    var control = pnlContents.GetControlFromPosition(columnIndex, rowIndex);
-                    pnlContents.Controls.Remove(control);
-                }
-            }
-        }
+            Padding = new Padding(5),
+            DefaultSpacing = new Size(5, 2)
+        };
 
         for (var rowIndex = 0; rowIndex < localizedProperties.Count; rowIndex++)
         {
-            if (rowIndex >= pnlContents.RowCount)
-            {
-                pnlContents.Controls.Add(CreateLabel(AnchorStyles.Right, FontStyle.Bold), 0, rowIndex);
-                pnlContents.Controls.Add(CreateLabel(AnchorStyles.Left, rowIndex == 0 ? FontStyle.Bold : FontStyle.Regular), 1, rowIndex);
-            }
-
-            var labelControl = pnlContents.GetControlFromPosition(0, rowIndex) as Label ?? throw new InvalidOperationException();
-            var displayValueControl = pnlContents.GetControlFromPosition(1, rowIndex) as Label ?? throw new InvalidOperationException();
+            var labelControl = CreateLabel(rowIndex == 0);
+            var displayValueControl = CreateLabel(rowIndex == 0);
 
             var localizedProperty = localizedProperties[rowIndex];
             labelControl.Text = localizedProperty.Key;
             displayValueControl.Text = localizedProperty.Value;
+
+            pnlContents.AddRow(labelControl, displayValueControl);
         }
 
-        pnlContents.RowCount = localizedProperties.Count;
-
-        Invalidate();
+        Content = pnlContents;
+        Visible = true;
     }
 }

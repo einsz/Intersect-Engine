@@ -1,4 +1,6 @@
 using System.Globalization;
+using Eto.Drawing;
+using Eto.Forms;
 using Intersect.Configuration;
 using Intersect.Editor.Content;
 using Intersect.Editor.Core;
@@ -26,11 +28,53 @@ public partial class FrmUpdate : Form
     private Updater? _updater;
     private UpdaterStatus? _updaterStatus;
 
+    // Controls
+    private Label lblVersion;
+    private Label lblStatus;
+    private Label lblFiles;
+    private Label lblSize;
+    private ProgressBar progressBar;
+    private UITimer tmrUpdate;
+
     public FrmUpdate()
     {
         CultureInfo.DefaultThreadCurrentCulture = new CultureInfo("en-US");
         InitializeComponent();
-        Icon = Program.Icon;
+    }
+
+    private void InitializeComponent()
+    {
+        Title = "Update";
+        MinimumSize = new Size(500, 300);
+        Size = new Size(500, 300);
+        Resizable = false;
+
+        lblVersion = new Label { Text = "" };
+        lblStatus = new Label { Text = "" };
+        lblFiles = new Label { Text = "", Visible = false };
+        lblSize = new Label { Text = "", Visible = false };
+        progressBar = new ProgressBar();
+        tmrUpdate = new UITimer { Interval = 0.05 };
+
+        var layout = new DynamicLayout();
+        layout.Padding = new Padding(20);
+        layout.DefaultSpacing = new Size(5, 5);
+
+        layout.Add(lblVersion);
+        layout.AddSpace();
+        layout.Add(lblStatus);
+        layout.Add(lblFiles);
+        layout.Add(lblSize);
+        layout.Add(progressBar);
+        layout.AddSpace();
+
+        Content = layout;
+
+        // Event handlers
+        Load += frmUpdate_Load;
+        tmrUpdate.Elapsed += tmrUpdate_Tick;
+        Shown += OnFormShown;
+        Closed += OnFormClosed;
     }
 
     private void frmUpdate_Load(object sender, EventArgs e)
@@ -84,42 +128,39 @@ public partial class FrmUpdate : Form
 
     private void InitLocalization()
     {
-        Text = Strings.Update.Title;
-        lblVersion.Text = Strings.Login.version.ToString(Application.ProductVersion);
-        lblVersion.Location = new System.Drawing.Point(
-            (lblVersion.Parent?.ClientRectangle.Right - (lblVersion.Parent?.Padding.Right + lblVersion.Width + 4)) ?? 0,
-            (lblVersion.Parent?.ClientRectangle.Bottom - (lblVersion.Parent?.Padding.Bottom + lblVersion.Height + 4)) ??
-            0
-        );
+        Title = Strings.Update.Title;
+        lblVersion.Text = Strings.Login.version.ToString("1.0.0");
         lblStatus.Text = Strings.Update.Checking;
+    }
+
+    private void OnFormClosed(object sender, EventArgs e)
+    {
+        _updater?.Stop();
+        Application.Instance.Quit();
     }
 
     protected override void OnClosed(EventArgs e)
     {
-        _updater?.Stop();
         base.OnClosed(e);
-        Application.Exit();
     }
 
-    protected override void OnShown(EventArgs e)
+    private void OnFormShown(object sender, EventArgs e)
     {
-        base.OnShown(e);
-
         if (_updater is null)
         {
             SwitchToLogin(requiresAuthentication: false, deferHide: true);
         }
         else
         {
-            tmrUpdate.Enabled = true;
+            tmrUpdate.Start();
         }
     }
 
     private void SwitchToLogin(bool requiresAuthentication, bool deferHide = false)
     {
-        lblFiles.Hide();
-        lblSize.Hide();
-        tmrUpdate.Enabled = false;
+        lblFiles.Visible = false;
+        lblSize.Visible = false;
+        tmrUpdate.Stop();
 
         var loginForm = Globals.LoginForm ??= new FrmLogin(requiresAuthentication);
 
@@ -129,7 +170,7 @@ public partial class FrmUpdate : Form
         {
             loginForm.Show();
 
-            Hide();
+            Visible = false;
         }
         catch
         {
@@ -173,9 +214,9 @@ public partial class FrmUpdate : Form
 
         _updaterStatus = null;
 
-        lblFiles.Show();
-        lblSize.Show();
-        tmrUpdate.Enabled = true;
+        lblFiles.Visible = true;
+        lblSize.Visible = true;
+        tmrUpdate.Start();
 
         Show();
 
@@ -222,36 +263,32 @@ public partial class FrmUpdate : Form
             return;
         }
 
-        progressBar.Style = _updater.Status == UpdateStatus.DownloadingManifest
-            ? ProgressBarStyle.Marquee
-            : ProgressBarStyle.Continuous;
-
         switch (_updater.Status)
         {
             case UpdateStatus.DownloadingManifest:
                 lblStatus.Text = Strings.Update.Checking;
                 break;
             case UpdateStatus.UpdateInProgress:
-                lblFiles.Show();
-                lblSize.Show();
+                lblFiles.Visible = true;
+                lblSize.Visible = true;
                 lblFiles.Text = Strings.Update.Files.ToString(_updater.FilesRemaining);
                 lblSize.Text = Strings.Update.Size.ToString(Updater.GetHumanReadableFileSize(_updater.SizeRemaining));
                 lblStatus.Text = Strings.Update.Updating.ToString((int)_updater.Progress);
                 progressBar.Value = Math.Min(100, (int)_updater.Progress);
                 break;
             case UpdateStatus.Restart:
-                lblFiles.Hide();
-                lblSize.Hide();
+                lblFiles.Visible = false;
+                lblSize.Visible = false;
                 progressBar.Value = 100;
                 lblStatus.Text = Strings.Update.Restart.ToString();
-                tmrUpdate.Enabled = false;
+                tmrUpdate.Stop();
 
                 if (!ProcessHelper.TryRelaunch())
                 {
                     ApplicationContext.CurrentContext.Logger.LogWarning("Failed to restart automatically");
                 }
 
-                this.Close();
+                Close();
 
                 break;
             case UpdateStatus.UpdateCompleted:
@@ -260,8 +297,8 @@ public partial class FrmUpdate : Form
                 SwitchToLogin(false);
                 break;
             case UpdateStatus.Error:
-                lblFiles.Hide();
-                lblSize.Hide();
+                lblFiles.Visible = false;
+                lblSize.Visible = false;
                 progressBar.Value = 100;
                 lblStatus.Text = Strings.Update.Error.ToString(_updater.Exception?.Message ?? "");
                 break;

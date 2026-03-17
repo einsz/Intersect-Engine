@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Reflection;
+using Eto.Forms;
 using Intersect.Configuration;
 using Intersect.Editor.General;
 using Intersect.Network;
@@ -216,7 +217,7 @@ internal static partial class Network
         else
         {
             MessageBox.Show(@"Disconnected!");
-            Application.Exit();
+            Application.Instance.Quit();
         }
     }
 

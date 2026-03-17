@@ -1,4 +1,5 @@
-using DarkUI.Forms;
+using Eto.Forms;
+using Eto.Drawing;
 using Hjg.Pngcs;
 using Intersect.Editor.Core;
 using Intersect.Editor.Forms;
@@ -11,10 +12,8 @@ using Newtonsoft.Json.Linq;
 
 namespace Intersect.Editor.Maps;
 
-
 public partial class MapGrid
 {
-
     public Rectangle ContentRect;
 
     public MapGridItem[,] Grid;
@@ -27,7 +26,7 @@ public partial class MapGrid
 
     private MapGridItem mContextMap;
 
-    private ContextMenuStrip mContextMenu;
+    private ContextMenu mContextMenu;
 
     private bool mCreateTextures;
 
@@ -35,9 +34,9 @@ public partial class MapGrid
 
     private int mCurrentCellY = -1;
 
-    private ToolStripMenuItem mDropDownLinkItem;
+    private Button mDropDownLinkItem;
 
-    private ToolStripMenuItem mDropDownUnlinkItem;
+    private Button mDropDownUnlinkItem;
 
     private List<Texture2D> mFreeTextures = new List<Texture2D>();
 
@@ -49,7 +48,7 @@ public partial class MapGrid
 
     private float mMinZoom;
 
-    private ToolStripMenuItem mRecacheMapItem;
+    private Button mRecacheMapItem;
 
     private bool mSizeChanged = true;
 
@@ -72,11 +71,11 @@ public partial class MapGrid
     public float Zoom = 1;
 
     public MapGrid(
-        ToolStripMenuItem dropDownItem,
-        ToolStripMenuItem dropDownUnlink,
-        ToolStripMenuItem recacheItem,
-        ContextMenuStrip contextMenu,
-        Icon? icon
+        Button dropDownItem,
+        Button dropDownUnlink,
+        Button recacheItem,
+        ContextMenu contextMenu,
+        object icon
     )
     {
         mWorkerThread = new Thread(AsyncLoadingThread);
@@ -89,7 +88,7 @@ public partial class MapGrid
         mRecacheMapItem = recacheItem;
         mRecacheMapItem.Click += _recacheMapItem_Click;
 
-        Icon = icon;
+        Icon = icon as Icon;
     }
 
     public Icon? Icon { get; set; }
@@ -122,7 +121,6 @@ public partial class MapGrid
                     }
                     catch (Exception ex)
                     {
-                        //Ignore errors that are likely caused by timing issues.
                         mFreeTextures.Add(tex);
                         mToLoad.Add(itm);
                     }
@@ -131,7 +129,7 @@ public partial class MapGrid
         }
     }
 
-    public Object GetMapGridLock()
+    public object GetMapGridLock()
     {
         return mTexLock;
     }
@@ -163,7 +161,8 @@ public partial class MapGrid
                         {
                             var obj = JObject.Parse(mapGrid[x, y]);
                             Grid[x, y] = new MapGridItem(
-                                Guid.Parse(obj["Guid"].ToString()), obj["Name"].ToString(),
+                                Guid.Parse(obj["Guid"].ToString()),
+                                obj["Name"].ToString(),
                                 int.Parse(obj["Revision"].ToString())
                             );
 
@@ -173,7 +172,6 @@ public partial class MapGrid
                 }
             }
 
-            //Get a list of maps -- if they are not in this grid.
             mLinkMaps.Clear();
             for (var i = 0; i < MapList.OrderedMaps.Count; i++)
             {
@@ -183,13 +181,14 @@ public partial class MapGrid
                 }
             }
 
-            mMaxZoom = 1f; //Real Size
+            mMaxZoom = 1f;
             Zoom = mMinZoom;
-            TileWidth = (int) (Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth * Zoom);
-            TileHeight = (int) (Options.Instance.Map.TileHeight * Options.Instance.Map.MapHeight * Zoom);
+            TileWidth = (int)(Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth * Zoom);
+            TileHeight = (int)(Options.Instance.Map.TileHeight * Options.Instance.Map.MapHeight * Zoom);
             ContentRect = new Rectangle(
                 ViewRect.Width / 2 - TileWidth * (GridWidth + 2) / 2,
-                ViewRect.Height / 2 - TileHeight * (GridHeight + 2) / 2, TileWidth * (GridWidth + 2),
+                ViewRect.Height / 2 - TileHeight * (GridHeight + 2) / 2,
+                TileWidth * (GridWidth + 2),
                 TileHeight * (GridHeight + 2)
             );
 
@@ -205,19 +204,24 @@ public partial class MapGrid
         {
             for (var y1 = 1; y1 < GridHeight + 1; y1++)
             {
-                if (new Rectangle(
-                    ContentRect.X + x1 * TileWidth, ContentRect.Y + y1 * TileHeight, TileWidth, TileHeight
-                ).Contains(new System.Drawing.Point(x, y)))
+                var tileRect = new Rectangle(
+                    ContentRect.X + x1 * TileWidth,
+                    ContentRect.Y + y1 * TileHeight,
+                    TileWidth,
+                    TileHeight
+                );
+
+                if (tileRect.Contains(new Eto.Drawing.Point((int)x, (int)y)))
                 {
                     if (Grid[x1 - 1, y1 - 1].MapId != Guid.Empty)
                     {
                         if (Globals.CurrentMap != null &&
                             Globals.CurrentMap.Changed() &&
-                            DarkMessageBox.ShowInformation(
-                                Strings.Mapping.savemapdialogue, Strings.Mapping.savemap, DarkDialogButton.YesNo,
-                                Icon
-                            ) ==
-                            DialogResult.Yes)
+                            MessageBox.Show(
+                                Strings.Mapping.savemapdialogue,
+                                Strings.Mapping.savemap,
+                                MessageBoxButtons.YesNo
+                            ) == DialogResult.Yes)
                         {
                             SaveMap();
                         }
@@ -236,7 +240,6 @@ public partial class MapGrid
         {
             if (Globals.Dragging == true)
             {
-                //Place the change, we done!
                 Globals.MapEditorWindow.ProcessSelectionMovement(Globals.CurrentMap, true);
                 Globals.MapEditorWindow.PlaceSelection();
             }
@@ -247,27 +250,31 @@ public partial class MapGrid
 
     public void ScreenshotWorld()
     {
-        var fileDialog = new SaveFileDialog()
+        var fileDialog = new SaveFileDialog
         {
-            Filter = "Png Image|*.png|JPeg Image|*.jpg|Bitmap Image|*.bmp|Gif Image|*.gif",
             Title = Strings.MapGrid.savescreenshotdialogue
         };
 
-        fileDialog.ShowDialog();
-        if (fileDialog.FileName != "")
+        fileDialog.Filters.Add(new FileFilter("PNG Image", ".png"));
+        fileDialog.Filters.Add(new FileFilter("JPEG Image", ".jpg"));
+        fileDialog.Filters.Add(new FileFilter("Bitmap Image", ".bmp"));
+        fileDialog.Filters.Add(new FileFilter("GIF Image", ".gif"));
+
+        var result = fileDialog.ShowDialog(null);
+        if (result == DialogResult.Ok && !string.IsNullOrEmpty(fileDialog.FileName))
         {
-            if (DarkMessageBox.ShowWarning(
-                    Strings.MapGrid.savescreenshotconfirm, Strings.MapGrid.savescreenshottitle,
-                    DarkDialogButton.YesNo, Icon
-                ) ==
-                DialogResult.Yes)
+            if (MessageBox.Show(
+                    Strings.MapGrid.savescreenshotconfirm,
+                    Strings.MapGrid.savescreenshottitle,
+                    MessageBoxButtons.YesNo
+                ) == DialogResult.Yes)
             {
                 FetchMissingPreviews(false);
                 Globals.PreviewProgressForm = new FrmProgress();
                 Globals.PreviewProgressForm.SetTitle(Strings.MapGrid.savingscreenshot);
                 var screenShotThread = new Thread(() => ScreenshotWorld(fileDialog.FileName));
                 screenShotThread.Start();
-                Globals.PreviewProgressForm.ShowDialog();
+                Globals.PreviewProgressForm.Show();
             }
         }
     }
@@ -278,19 +285,19 @@ public partial class MapGrid
         var colSize = Options.Instance.Map.MapWidth * Options.Instance.Map.TileWidth;
         var cols = colSize * GridWidth;
         var rows = rowSize * GridHeight;
-        var tmpBitmap = new Bitmap(colSize, rowSize);
+        var tmpBitmap = new System.Drawing.Bitmap(colSize, rowSize);
         var g = System.Drawing.Graphics.FromImage(tmpBitmap);
         var png = new PngWriter(
-            new FileStream(filename, FileMode.OpenOrCreate), new ImageInfo(cols, rows, 16, true)
+            new FileStream(filename, FileMode.OpenOrCreate),
+            new ImageInfo(cols, rows, 16, true)
         );
 
-        var pngReaderDict = new Dictionary<Guid, Bitmap>();
+        var pngReaderDict = new Dictionary<Guid, System.Drawing.Bitmap>();
         var cacheRow = 0;
 
-        //Generate one row at a time.
         for (var y = 0; y < rows; y++)
         {
-            var gridRow = (int) Math.Floor(y / (double) rowSize);
+            var gridRow = (int)Math.Floor(y / (double)rowSize);
             if (gridRow != cacheRow)
             {
                 foreach (var cache in pngReaderDict)
@@ -310,7 +317,7 @@ public partial class MapGrid
                 var item = Grid[gridCol, gridRow];
                 if (item.MapId != Guid.Empty)
                 {
-                    Bitmap reader = null;
+                    System.Drawing.Bitmap reader = null;
                     if (pngReaderDict.ContainsKey(item.MapId))
                     {
                         reader = pngReaderDict[item.MapId];
@@ -320,7 +327,7 @@ public partial class MapGrid
                         var data = Database.LoadMapCacheRaw(item.MapId, item.Revision);
                         if (data != null)
                         {
-                            reader = new Bitmap(new MemoryStream(data));
+                            reader = new System.Drawing.Bitmap(new MemoryStream(data));
                             pngReaderDict.Add(item.MapId, reader);
                         }
                     }
@@ -329,12 +336,9 @@ public partial class MapGrid
                     {
                         var rowNum = y - gridRow * rowSize;
 
-                        //Get the pixel color we need
                         for (var x1 = x * colSize; x1 < x * colSize + colSize; x1++)
                         {
                             var clr = reader.GetPixel(x1 - x * colSize, rowNum);
-
-                            // Color.FromArgb(ImageLineHelper.GetPixelToARGB8(line, x1 - (x) * colSize));
                             row[x1 * 4] = clr.R;
                             row[x1 * 4 + 1] = clr.G;
                             row[x1 * 4 + 2] = clr.B;
@@ -366,10 +370,12 @@ public partial class MapGrid
 
             png.WriteRowByte(row, y);
             Globals.PreviewProgressForm.SetProgress(
-                Strings.MapGrid.savingrow.ToString(y, rows), (int) (y / (float) rows * 100), false
+                Strings.MapGrid.savingrow.ToString(y, rows),
+                (int)(y / (float)rows * 100),
+                false
             );
 
-            Application.DoEvents();
+            Application.Instance.Invoke(() => { });
         }
 
         png.End();
@@ -400,20 +406,20 @@ public partial class MapGrid
         var maps = new List<Guid>();
         if (clearAllFirst)
         {
-            if (DarkMessageBox.ShowWarning(
-                    Strings.MapGrid.clearandfetch, Strings.MapGrid.fetchcaption, DarkDialogButton.YesNo,
-                    Icon
-                ) !=
-                DialogResult.Yes)
+            if (MessageBox.Show(
+                    Strings.MapGrid.clearandfetch,
+                    Strings.MapGrid.fetchcaption,
+                    MessageBoxButtons.YesNo
+                ) != DialogResult.Yes)
             {
                 return;
             }
 
-            if (DarkMessageBox.ShowInformation(
-                    Strings.MapGrid.keepmapcache, Strings.MapGrid.mapcachecaption, DarkDialogButton.YesNo,
-                    Icon
-                ) ==
-                DialogResult.Yes)
+            if (MessageBox.Show(
+                    Strings.MapGrid.keepmapcache,
+                    Strings.MapGrid.mapcachecaption,
+                    MessageBoxButtons.YesNo
+                ) == DialogResult.Yes)
             {
                 Database.GridHideOverlay = Core.Graphics.HideOverlay;
                 Database.GridHideDarkness = Core.Graphics.HideDarkness;
@@ -422,7 +428,9 @@ public partial class MapGrid
                 if (Core.Graphics.LightColor != null)
                 {
                     Database.GridLightColor = System.Drawing.Color.FromArgb(
-                            Core.Graphics.LightColor.A, Core.Graphics.LightColor.R, Core.Graphics.LightColor.G,
+                            Core.Graphics.LightColor.A,
+                            Core.Graphics.LightColor.R,
+                            Core.Graphics.LightColor.G,
                             Core.Graphics.LightColor.B
                         )
                         .ToArgb();
@@ -445,7 +453,6 @@ public partial class MapGrid
             Database.ClearAllMapCache();
         }
 
-        //Get a list of maps without images.
         for (var x = 0; x < GridWidth; x++)
         {
             for (var y = 0; y < GridHeight; y++)
@@ -468,17 +475,19 @@ public partial class MapGrid
         if (maps.Count > 0)
         {
             if (clearAllFirst ||
-                DarkMessageBox.ShowWarning(
-                    Strings.MapGrid.justfetch, Strings.MapGrid.fetchcaption, DarkDialogButton.YesNo,
-                    Icon
-                ) ==
-                DialogResult.Yes)
+                MessageBox.Show(
+                    Strings.MapGrid.justfetch,
+                    Strings.MapGrid.fetchcaption,
+                    MessageBoxButtons.YesNo
+                ) == DialogResult.Yes)
             {
                 Globals.FetchingMapPreviews = true;
                 Globals.PreviewProgressForm = new FrmProgress();
                 Globals.PreviewProgressForm.SetTitle(Strings.MapGrid.fetchingmaps);
                 Globals.PreviewProgressForm.SetProgress(
-                    Strings.MapGrid.fetchingprogress.ToString(0, maps.Count), 0, false
+                    Strings.MapGrid.fetchingprogress.ToString(0, maps.Count),
+                    0,
+                    false
                 );
 
                 Globals.FetchCount = maps.Count;
@@ -488,7 +497,7 @@ public partial class MapGrid
                     PacketSender.SendNeedMap(maps[i]);
                 }
 
-                Globals.PreviewProgressForm.ShowDialog();
+                Globals.PreviewProgressForm.Show();
             }
         }
     }
@@ -499,9 +508,14 @@ public partial class MapGrid
         {
             for (var y1 = 0; y1 < GridHeight + 2; y1++)
             {
-                if (new Rectangle(
-                    ContentRect.X + x1 * TileWidth, ContentRect.Y + y1 * TileHeight, TileWidth, TileHeight
-                ).Contains(new System.Drawing.Point(x, y)))
+                var tileRect = new Rectangle(
+                    ContentRect.X + x1 * TileWidth,
+                    ContentRect.Y + y1 * TileHeight,
+                    TileWidth,
+                    TileHeight
+                );
+
+                if (tileRect.Contains(new Eto.Drawing.Point((int)x, (int)y)))
                 {
                     mCurrentCellX = x1;
                     mCurrentCellY = y1;
@@ -520,7 +534,6 @@ public partial class MapGrid
                             {
                                 var adjacentMap = Guid.Empty;
 
-                                //Check Left
                                 if (mCurrentCellX > 1 && mCurrentCellY != 0 && mCurrentCellY - 1 < GridHeight)
                                 {
                                     if (Grid[mCurrentCellX - 2, mCurrentCellY - 1].MapId != Guid.Empty)
@@ -529,7 +542,6 @@ public partial class MapGrid
                                     }
                                 }
 
-                                //Check Right
                                 if (mCurrentCellX < GridWidth &&
                                     mCurrentCellY != 0 &&
                                     mCurrentCellY - 1 < GridHeight)
@@ -540,7 +552,6 @@ public partial class MapGrid
                                     }
                                 }
 
-                                //Check Up
                                 if (mCurrentCellX != 0 && mCurrentCellY > 1 && mCurrentCellX - 1 < GridWidth)
                                 {
                                     if (Grid[mCurrentCellX - 1, mCurrentCellY - 2].MapId != Guid.Empty)
@@ -549,7 +560,6 @@ public partial class MapGrid
                                     }
                                 }
 
-                                //Check Down
                                 if (mCurrentCellX != 0 &&
                                     mCurrentCellY < GridHeight &&
                                     mCurrentCellX - 1 < GridWidth)
@@ -562,7 +572,7 @@ public partial class MapGrid
 
                                 if (adjacentMap != Guid.Empty)
                                 {
-                                    mContextMenu.Show(mapGridView, new System.Drawing.Point(x, y));
+                                    mContextMenu.Show();
                                     mDropDownUnlinkItem.Visible = false;
                                     mDropDownLinkItem.Visible = true;
                                     mRecacheMapItem.Visible = false;
@@ -571,7 +581,7 @@ public partial class MapGrid
                             else
                             {
                                 mContextMap = Grid[mCurrentCellX - 1, mCurrentCellY - 1];
-                                mContextMenu.Show(mapGridView, new System.Drawing.Point(x, y));
+                                mContextMenu.Show();
                                 mDropDownUnlinkItem.Visible = true;
                                 mRecacheMapItem.Visible = true;
                                 mDropDownLinkItem.Visible = false;
@@ -592,11 +602,11 @@ public partial class MapGrid
     {
         if (mContextMap != null && mContextMap.MapId != Guid.Empty)
         {
-            if (DarkMessageBox.ShowWarning(
-                    Strings.MapGrid.unlinkprompt.ToString(mContextMap.Name), Strings.MapGrid.unlinkcaption,
-                    DarkDialogButton.YesNo, Icon
-                ) ==
-                DialogResult.Yes)
+            if (MessageBox.Show(
+                    Strings.MapGrid.unlinkprompt.ToString(mContextMap.Name),
+                    Strings.MapGrid.unlinkcaption,
+                    MessageBoxButtons.YesNo
+                ) == DialogResult.Yes)
             {
                 PacketSender.SendUnlinkMap(mContextMap.MapId);
             }
@@ -607,14 +617,13 @@ public partial class MapGrid
     {
         if (mContextMap != null && mContextMap.MapId != Guid.Empty)
         {
-            //Fetch and screenshot this singular map
             Database.SaveMapCache(mContextMap.MapId, mContextMap.Revision, null);
             if (MapInstance.Get(mContextMap.MapId) != null)
             {
                 MapInstance.Get(mContextMap.MapId).Delete();
             }
 
-            Globals.MapsToFetch = new List<Guid>() {mContextMap.MapId};
+            Globals.MapsToFetch = new List<Guid>() { mContextMap.MapId };
             PacketSender.SendNeedMap(mContextMap.MapId);
         }
     }
@@ -623,14 +632,12 @@ public partial class MapGrid
     {
         var frmWarpSelection = new FrmWarpSelection();
         frmWarpSelection.InitForm(false, mLinkMaps);
-        frmWarpSelection.ShowDialog();
+        frmWarpSelection.ShowModal(Application.Instance.MainForm);
         if (frmWarpSelection.GetResult())
         {
-            //Make sure the selected tile is adjacent to a map
             var linkMapId = frmWarpSelection.GetMap();
             var adjacentMapId = Guid.Empty;
 
-            //Check Left
             if (mCurrentCellX > 1 && mCurrentCellY != 0 && mCurrentCellY - 1 < GridHeight)
             {
                 if (Grid[mCurrentCellX - 2, mCurrentCellY - 1].MapId != Guid.Empty)
@@ -639,7 +646,6 @@ public partial class MapGrid
                 }
             }
 
-            //Check Right
             if (mCurrentCellX < GridWidth && mCurrentCellY != 0 && mCurrentCellY - 1 < GridHeight)
             {
                 if (Grid[mCurrentCellX, mCurrentCellY - 1].MapId != Guid.Empty)
@@ -648,7 +654,6 @@ public partial class MapGrid
                 }
             }
 
-            //Check Up
             if (mCurrentCellX != 0 && mCurrentCellY > 1 && mCurrentCellX - 1 < GridWidth)
             {
                 if (Grid[mCurrentCellX - 1, mCurrentCellY - 2].MapId != Guid.Empty)
@@ -657,7 +662,6 @@ public partial class MapGrid
                 }
             }
 
-            //Check Down
             if (mCurrentCellX != 0 && mCurrentCellY < GridHeight && mCurrentCellX - 1 < GridWidth)
             {
                 if (Grid[mCurrentCellX - 1, mCurrentCellY].MapId != Guid.Empty)
@@ -676,17 +680,16 @@ public partial class MapGrid
     public void Update(Microsoft.Xna.Framework.Rectangle panelBounds)
     {
         mMinZoom = Math.Min(
-                       panelBounds.Width / (float) (Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth * (GridWidth + 2)),
-                       panelBounds.Height / (float) (Options.Instance.Map.TileHeight * Options.Instance.Map.MapHeight * (GridHeight + 2))
+                       panelBounds.Width / (float)(Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth * (GridWidth + 2)),
+                       panelBounds.Height / (float)(Options.Instance.Map.TileHeight * Options.Instance.Map.MapHeight * (GridHeight + 2))
                    ) /
                    2f;
 
-        //Gotta calculate
         if (Zoom < mMinZoom)
         {
             Zoom = mMinZoom * 2;
-            TileWidth = (int) (Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth * Zoom);
-            TileHeight = (int) (Options.Instance.Map.TileHeight * Options.Instance.Map.MapHeight * Zoom);
+            TileWidth = (int)(Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth * Zoom);
+            TileHeight = (int)(Options.Instance.Map.TileHeight * Options.Instance.Map.MapHeight * Zoom);
             ContentRect = new Rectangle(0, 0, TileWidth * (GridWidth + 2), TileHeight * (GridHeight + 2));
             lock (mTexLock)
             {
@@ -733,14 +736,15 @@ public partial class MapGrid
                     {
                         for (var y = 0; y < GridHeight; y++)
                         {
-                            //Figure out if this texture should be loaded
-                            if (new Rectangle(
-                                    ContentRect.X + (x + 1) * TileWidth, ContentRect.Y + (y + 1) * TileHeight,
-                                    TileWidth, TileHeight
-                                ).IntersectsWith(ViewRect) &&
-                                Grid[x, y] != null)
+                            var tileRect = new Rectangle(
+                                ContentRect.X + (x + 1) * TileWidth,
+                                ContentRect.Y + (y + 1) * TileHeight,
+                                TileWidth,
+                                TileHeight
+                            );
+
+                            if (tileRect.Intersects(ViewRect) && Grid[x, y] != null)
                             {
-                                //if not loaded, add it to the queue
                                 if ((Grid[x, y].Tex == null || Grid[x, y].Tex.IsDisposed) &&
                                     Grid[x, y].MapId != Guid.Empty &&
                                     !mToLoad.Contains(Grid[x, y]))
@@ -750,7 +754,6 @@ public partial class MapGrid
                             }
                             else
                             {
-                                //If loaded, kick it to the curb
                                 if (mToLoad.Contains(Grid[x, y]))
                                 {
                                     mToLoad.Remove(Grid[x, y]);
@@ -779,12 +782,14 @@ public partial class MapGrid
                 {
                     for (var y = 0; y < GridHeight; y++)
                     {
-                        //Figure out if this texture should be loaded
-                        if (new Rectangle(
-                                ContentRect.X + (x + 1) * TileWidth, ContentRect.Y + (y + 1) * TileHeight,
-                                TileWidth, TileHeight
-                            ).Contains(new System.Drawing.Point(mouseX, mouseY)) &&
-                            Grid[x, y] != null)
+                        var tileRect = new Rectangle(
+                            ContentRect.X + (x + 1) * TileWidth,
+                            ContentRect.Y + (y + 1) * TileHeight,
+                            TileWidth,
+                            TileHeight
+                        );
+
+                        if (tileRect.Contains(new Eto.Drawing.Point((int)mouseX, (int)mouseY)) && Grid[x, y] != null)
                         {
                             return Grid[x, y];
                         }
@@ -800,8 +805,8 @@ public partial class MapGrid
     {
         lock (mTexLock)
         {
-            var hCount = (int) Math.Ceiling((float) panelBounds.Width / TileWidth) + 2;
-            var wCount = (int) Math.Ceiling((float) panelBounds.Height / TileHeight) + 2;
+            var hCount = (int)Math.Ceiling((float)panelBounds.Width / TileWidth) + 2;
+            var wCount = (int)Math.Ceiling((float)panelBounds.Height / TileHeight) + 2;
             for (var i = 0; i < hCount * wCount && i < GridWidth * GridHeight; i++)
             {
                 mTextures.Add(new Texture2D(Core.Graphics.GetGraphicsDevice(), TileWidth, TileHeight));
@@ -864,9 +869,8 @@ public partial class MapGrid
     {
         var amt = val / 120;
 
-        //Find the original tile we are hovering over
-        var x1 = (double) Math.Min(ContentRect.Width, Math.Max(0, mouseX - ContentRect.X)) / (float) TileWidth;
-        var y1 = (double) Math.Min(ContentRect.Height, Math.Max(0, mouseY - ContentRect.Y)) / (float) TileHeight;
+        var x1 = (double)Math.Min(ContentRect.Width, Math.Max(0, mouseX - ContentRect.X)) / (float)TileWidth;
+        var y1 = (double)Math.Min(ContentRect.Height, Math.Max(0, mouseY - ContentRect.Y)) / (float)TileHeight;
         var prevZoom = Zoom;
         Zoom += .05f * amt;
         if (prevZoom != Zoom)
@@ -889,20 +893,17 @@ public partial class MapGrid
             Zoom = mMaxZoom;
         }
 
-        TileWidth = (int) (Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth * Zoom);
-        TileHeight = (int) (Options.Instance.Map.TileHeight * Options.Instance.Map.MapHeight * Zoom);
+        TileWidth = (int)(Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth * Zoom);
+        TileHeight = (int)(Options.Instance.Map.TileHeight * Options.Instance.Map.MapHeight * Zoom);
 
-        //were gonna get the X/Y of where the content rect would need so that the grid location that the mouse is hovering over would be center of the viewing rect
-        //Get the current location of the mouse over the current content rectangle
-
-        var x2 = (int) (x1 * TileWidth);
-        var y2 = (int) (y1 * TileHeight);
+        var x2 = (int)(x1 * TileWidth);
+        var y2 = (int)(y1 * TileHeight);
 
         ContentRect = new Rectangle(
-            -x2 + mouseX, -y2 + mouseY, TileWidth * (GridWidth + 2), TileHeight * (GridHeight + 2)
+            -x2 + mouseX,
+            -y2 + mouseY,
+            TileWidth * (GridWidth + 2),
+            TileHeight * (GridHeight + 2)
         );
-
-        //Lets go the extra mile to make sure our selected map is
     }
-
 }

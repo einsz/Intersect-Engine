@@ -1,3 +1,4 @@
+using System.Drawing;
 using System.Drawing.Imaging;
 using Intersect.Compression;
 using Intersect.Editor.Content;

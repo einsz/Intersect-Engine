@@ -2,241 +2,256 @@ using Intersect.Editor.Core;
 using Intersect.Editor.General;
 using Intersect.Editor.Localization;
 using Intersect.Editor.Maps;
-using Microsoft.Xna.Framework.Graphics;
-using WeifenLuo.WinFormsUI.Docking;
+using Eto.Forms;
+using Eto.Drawing;
 using Graphics = Intersect.Editor.Core.Graphics;
 
 namespace Intersect.Editor.Forms.DockingElements;
 
-
-public partial class FrmMapGrid : DockContent
+public partial class FrmMapGrid : Panel
 {
+    private bool _dragging;
+    private int _dragX;
+    private int _dragY;
+    private int _posX;
+    private int _posY;
+    private MapGridItem _toolTipItem;
 
-    //MonoGame Swap Chain
-    private SwapChainRenderTarget mChain;
+    private Drawable _pnlMapGrid;
+    private Button _btnScreenshotWorld;
+    private Button _btnGridView;
+    private Button _btnFetchPreview;
+    private Button _btnDownloadMissing;
+    private Button _btnReDownloadAll;
+    private Button _btnLinkMap;
+    private Button _btnUnlinkMap;
+    private Button _btnRecacheMap;
+    private ContextMenu _contextMenu;
 
-    private bool mDragging;
-
-    private int mDragX;
-
-    private int mDragY;
-
-    private int mPosX;
-
-    private int mPosY;
-
-    private ToolTip mToolTip = new ToolTip();
-
-    private MapGridItem mToolTipItem;
+    public Drawable PnlMapGrid => _pnlMapGrid;
 
     public FrmMapGrid()
     {
-        InitializeComponent();
-        Icon = Program.Icon;
-
-        pnlMapGrid.MouseWheel += PnlMapGrid_MouseWheel;
+        InitializeComponents();
+        InitLocalization();
+        InitGridWindow();
     }
 
-    private void frmMapGrid_Load(object sender, EventArgs e)
+    private void InitializeComponents()
     {
-        CreateSwapChain();
-        Globals.MapGrid ??= new MapGrid(
-            linkMapToolStripMenuItem,
-            unlinkMapToolStripMenuItem,
-            recacheMapToolStripMenuItem,
-            contextMenuStrip,
-            Icon
+        _pnlMapGrid = new Drawable();
+        _pnlMapGrid.CanFocus = true;
+
+        _btnScreenshotWorld = new Button { Text = Strings.MapGrid.screenshotworld };
+        _btnScreenshotWorld.Click += BtnScreenshotWorld_Click;
+
+        _btnGridView = new Button { Text = Strings.MapGrid.gridlines };
+        _btnGridView.Click += BtnGridView_Click;
+
+        _btnFetchPreview = new Button { Text = Strings.MapGrid.preview };
+        _btnFetchPreview.Click += (s, e) => Globals.MapGrid?.FetchMissingPreviews(false);
+
+        _btnDownloadMissing = new Button { Text = Strings.MapGrid.downloadmissing };
+        _btnDownloadMissing.Click += (s, e) => Globals.MapGrid?.FetchMissingPreviews(false);
+
+        _btnReDownloadAll = new Button { Text = Strings.MapGrid.downloadall };
+        _btnReDownloadAll.Click += (s, e) => Globals.MapGrid?.FetchMissingPreviews(true);
+
+        _btnLinkMap = new Button { Text = Strings.MapGrid.link };
+        _btnUnlinkMap = new Button { Text = Strings.MapGrid.unlink };
+        _btnRecacheMap = new Button { Text = Strings.MapGrid.recache };
+
+        var contextLinkMap = new ButtonMenuItem { Text = Strings.MapGrid.link };
+        var contextUnlinkMap = new ButtonMenuItem { Text = Strings.MapGrid.unlink };
+        var contextRecacheMap = new ButtonMenuItem { Text = Strings.MapGrid.recache };
+        var contextDownloadMissing = new ButtonMenuItem { Text = Strings.MapGrid.downloadmissing };
+        contextDownloadMissing.Click += (s, e) => Globals.MapGrid?.FetchMissingPreviews(false);
+        var contextReDownloadAll = new ButtonMenuItem { Text = Strings.MapGrid.downloadall };
+        contextReDownloadAll.Click += (s, e) => Globals.MapGrid?.FetchMissingPreviews(true);
+
+        _contextMenu = new ContextMenu(
+            contextLinkMap,
+            contextUnlinkMap,
+            contextRecacheMap,
+            new SeparatorMenuItem(),
+            contextDownloadMissing,
+            contextReDownloadAll
         );
 
-        InitLocalization();
+        var buttonRow = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 4,
+            Items =
+            {
+                _btnScreenshotWorld,
+                _btnGridView,
+                _btnFetchPreview,
+                _btnDownloadMissing,
+                _btnReDownloadAll
+            }
+        };
+
+        var layout = new DynamicLayout();
+        layout.AddRow(buttonRow);
+        layout.Add(_pnlMapGrid, yscale: true);
+
+        Content = layout;
+
+        _pnlMapGrid.MouseWheel += PnlMapGrid_MouseWheel;
+        _pnlMapGrid.MouseDown += PnlMapGrid_MouseDown;
+        _pnlMapGrid.MouseMove += PnlMapGrid_MouseMove;
+        _pnlMapGrid.MouseUp += PnlMapGrid_MouseUp;
+        _pnlMapGrid.MouseLeave += PnlMapGrid_MouseLeave;
+        _pnlMapGrid.MouseDoubleClick += PnlMapGrid_MouseDoubleClick;
+        _pnlMapGrid.KeyDown += PnlMapGrid_KeyDown;
+        _pnlMapGrid.Paint += PnlMapGrid_Paint;
     }
 
     private void InitLocalization()
     {
-        Text = Strings.MapGrid.title;
-        btnScreenshotWorld.Text = Strings.MapGrid.screenshotworld;
-        btnGridView.Text = Strings.MapGrid.gridlines;
-        btnFetchPreview.Text = Strings.MapGrid.preview;
-        downloadMissingPreviewsToolStripMenuItem.Text = Strings.MapGrid.downloadmissing;
-        reDownloadAllPreviewsToolStripMenuItem.Text = Strings.MapGrid.downloadall;
-        unlinkMapToolStripMenuItem.Text = Strings.MapGrid.unlink;
-        linkMapToolStripMenuItem.Text = Strings.MapGrid.link;
-        recacheMapToolStripMenuItem.Text = Strings.MapGrid.recache;
+        // Panel doesn't have Text property in Eto.Forms
+        _btnGridView.Text = Strings.MapGrid.gridlines;
+        _btnFetchPreview.Text = Strings.MapGrid.preview;
+        _btnDownloadMissing.Text = Strings.MapGrid.downloadmissing;
+        _btnReDownloadAll.Text = Strings.MapGrid.downloadall;
+        _btnUnlinkMap.Text = Strings.MapGrid.unlink;
+        _btnLinkMap.Text = Strings.MapGrid.link;
+        _btnRecacheMap.Text = Strings.MapGrid.recache;
     }
 
     public void InitGridWindow()
     {
-        CreateSwapChain();
-    }
-
-    private void CreateSwapChain()
-    {
-        if (!Globals.ClosingEditor)
+        if (Globals.MapGrid == null)
         {
-            if (mChain != null)
-            {
-                mChain.Dispose();
-            }
-
-            if (Graphics.GetGraphicsDevice() != null)
-            {
-                if (pnlMapGrid.Width > 0 && pnlMapGrid.Height > 0)
-                {
-                    if (pnlMapGrid.Width > 0 && pnlMapGrid.Height > 0)
-                    {
-                        mChain = new SwapChainRenderTarget(
-                            Graphics.GetGraphicsDevice(), pnlMapGrid.Handle, pnlMapGrid.Width, pnlMapGrid.Height,
-                            false, SurfaceFormat.Color, DepthFormat.Depth24, 0, RenderTargetUsage.DiscardContents,
-                            PresentInterval.Immediate
-                        );
-
-                        Graphics.SetMapGridChain(mChain);
-                    }
-                }
-            }
+            Globals.MapGrid = new MapGrid(
+                _btnLinkMap,
+                _btnUnlinkMap,
+                _btnRecacheMap,
+                _contextMenu,
+                null
+            );
         }
     }
 
-    private void frmMapGrid_DockStateChanged(object sender, EventArgs e)
+    public void ResetForm()
     {
-        CreateSwapChain();
+        _dragging = false;
+        _toolTipItem = null;
     }
 
-    private void pnlMapGrid_Resize(object sender, EventArgs e)
+    private void PnlMapGrid_Paint(object sender, PaintEventArgs e)
     {
-        CreateSwapChain();
+        Globals.MapGrid?.Draw(e.Graphics, _pnlMapGrid.Width, _pnlMapGrid.Height);
     }
 
     private void PnlMapGrid_MouseWheel(object sender, MouseEventArgs e)
     {
-        Globals.MapGrid.ZoomIn(e.Delta, e.X, e.Y);
+        Globals.MapGrid?.ZoomIn((int)(e.Delta.Height * 120), (int)e.Location.X, (int)e.Location.Y);
+        _pnlMapGrid.Invalidate();
     }
 
-    private void pnlMapGrid_MouseMove(object sender, MouseEventArgs e)
+    private void PnlMapGrid_MouseMove(object sender, MouseEventArgs e)
     {
-        mPosX = e.X;
-        mPosY = e.Y;
-        if (mDragging)
+        _posX = (int)e.Location.X;
+        _posY = (int)e.Location.Y;
+
+        if (_dragging)
         {
-            Globals.MapGrid.Move(mDragX - e.X, mDragY - e.Y);
-            mDragX = e.X;
-            mDragY = e.Y;
+            Globals.MapGrid?.Move(_dragX - _posX, _dragY - _posY);
+            _dragX = _posX;
+            _dragY = _posY;
+            _pnlMapGrid.Invalidate();
         }
 
-        if (mToolTip.Active && mToolTipItem != null)
+        var currentItem = Globals.MapGrid?.GetItemAt(_posX, _posY);
+        if (_toolTipItem != null && currentItem != _toolTipItem)
         {
-            if (Globals.MapGrid.GetItemAt(mPosX, mPosY) != mToolTipItem)
-            {
-                mToolTip.Hide(pnlMapGrid);
-                mToolTipItem = null;
-            }
+            _toolTipItem = null;
         }
-        else
+        else if (currentItem != null)
         {
-            mToolTipItem = Globals.MapGrid.GetItemAt(mPosX, mPosY);
-            if (mToolTipItem != null)
-            {
-                mToolTip.Show(mToolTipItem.Name, pnlMapGrid);
-            }
+            _toolTipItem = currentItem;
         }
     }
 
-    private void pnlMapGrid_MouseDown(object sender, MouseEventArgs e)
+    private void PnlMapGrid_MouseDown(object sender, MouseEventArgs e)
     {
-        if (e.Button == MouseButtons.Left || e.Button == MouseButtons.Middle)
+        if (e.Buttons == MouseButtons.Primary || e.Buttons == MouseButtons.Middle)
         {
-            mDragging = true;
-            mDragX = e.X;
-            mDragY = e.Y;
+            _dragging = true;
+            _dragX = (int)e.Location.X;
+            _dragY = (int)e.Location.Y;
         }
-        else if (e.Button == MouseButtons.Right)
+        else if (e.Buttons == MouseButtons.Alternate)
         {
-            Globals.MapGrid.RightClickGrid(e.X, e.Y, pnlMapGrid);
-        }
-    }
-
-    private void pnlMapGrid_MouseUp(object sender, MouseEventArgs e)
-    {
-        mDragging = false;
-    }
-
-    private void pnlMapGrid_MouseLeave(object sender, EventArgs e)
-    {
-        if (mToolTip.Active)
-        {
-            mToolTip.Hide(pnlMapGrid);
-            mToolTipItem = null;
+            Globals.MapGrid?.RightClickGrid((int)e.Location.X, (int)e.Location.Y, _pnlMapGrid);
         }
     }
 
-    private void pnlMapGrid_MouseHover(object sender, EventArgs e)
+    private void PnlMapGrid_MouseUp(object sender, MouseEventArgs e)
     {
+        _dragging = false;
     }
 
-    private void btnGridView_Click(object sender, EventArgs e)
+    private void PnlMapGrid_MouseLeave(object sender, MouseEventArgs e)
     {
-        Globals.MapGrid.ShowLines = !Globals.MapGrid.ShowLines;
+        _toolTipItem = null;
     }
 
-    private void pnlMapGrid_MouseDoubleClick(object sender, MouseEventArgs e)
+    private void PnlMapGrid_MouseDoubleClick(object sender, MouseEventArgs e)
     {
-        Globals.MapGrid.DoubleClick(e.X, e.Y);
+        Globals.MapGrid?.DoubleClick((int)e.Location.X, (int)e.Location.Y);
     }
 
-    private void downloadMissingPreviewsToolStripMenuItem_Click(object sender, EventArgs e)
+    private void BtnGridView_Click(object sender, EventArgs e)
     {
-        Globals.MapGrid.FetchMissingPreviews(false);
-    }
-
-    private void reDownloadAllPreviewsToolStripMenuItem_Click(object sender, EventArgs e)
-    {
-        Globals.MapGrid.FetchMissingPreviews(true);
-    }
-
-    private void btnScreenshotWorld_Click(object sender, EventArgs e)
-    {
-        Globals.MapGrid.ScreenshotWorld();
-    }
-
-    private void frmMapGrid_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.KeyCode == Keys.Oemplus || e.KeyCode == Keys.Add)
+        if (Globals.MapGrid != null)
         {
-            var args = new MouseEventArgs(MouseButtons.None, 0, mPosX, mPosY, 120);
-            PnlMapGrid_MouseWheel(null, args);
+            Globals.MapGrid.ShowLines = !Globals.MapGrid.ShowLines;
+            _pnlMapGrid.Invalidate();
         }
-        else if (e.KeyCode == Keys.OemMinus || e.KeyCode == Keys.Subtract)
+    }
+
+    private void BtnScreenshotWorld_Click(object sender, EventArgs e)
+    {
+        Globals.MapGrid?.ScreenshotWorld();
+    }
+
+    private void PnlMapGrid_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Keys.Add || (e.Modifiers == Keys.Shift && e.Key == Keys.Equal))
         {
-            var args = new MouseEventArgs(MouseButtons.None, 0, mPosX, mPosY, -120);
-            PnlMapGrid_MouseWheel(null, args);
+            Globals.MapGrid?.ZoomIn(120, _posX, _posY);
+        }
+        else if (e.Key == Keys.Subtract || e.Key == Keys.Minus)
+        {
+            Globals.MapGrid?.ZoomIn(-120, _posX, _posY);
         }
 
         var xDiff = 0;
         var yDiff = 0;
-        if (e.KeyCode == Keys.W || e.KeyCode == Keys.Up)
+        if (e.Key == Keys.W || e.Key == Keys.Up)
         {
             yDiff -= 20;
         }
-
-        if (e.KeyCode == Keys.S || e.KeyCode == Keys.Down)
+        if (e.Key == Keys.S || e.Key == Keys.Down)
         {
             yDiff += 20;
         }
-
-        if (e.KeyCode == Keys.A || e.KeyCode == Keys.Left)
+        if (e.Key == Keys.A || e.Key == Keys.Left)
         {
             xDiff -= 20;
         }
-
-        if (e.KeyCode == Keys.D || e.KeyCode == Keys.Right)
+        if (e.Key == Keys.D || e.Key == Keys.Right)
         {
             xDiff += 20;
         }
 
         if (xDiff != 0 || yDiff != 0)
         {
-            Globals.MapGrid.Move(xDiff, yDiff);
+            Globals.MapGrid?.Move(xDiff, yDiff);
+            _pnlMapGrid.Invalidate();
         }
     }
-
 }

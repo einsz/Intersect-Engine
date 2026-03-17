@@ -1,76 +1,113 @@
 using System.Reflection;
+using Eto.Forms;
+using Eto.Drawing;
 using Intersect.Editor.Core;
 using Intersect.Editor.General;
 using Intersect.Editor.Localization;
 using Intersect.Editor.Maps;
 using Intersect.Editor.Networking;
 using Intersect.Framework.Core.GameObjects.Maps.MapList;
-using Graphics = System.Drawing.Graphics;
 
 namespace Intersect.Editor.Forms;
 
-
-public partial class FrmWarpSelection : Form
+public class FrmWarpSelection : Dialog<bool>
 {
-
     private Guid mCurrentMapId = Guid.Empty;
-
     private int mCurrentX;
-
     private int mCurrentY;
-
     private Guid mDrawnMap = Guid.Empty;
-
-    private Image mMapImage;
-
     private List<Guid>? mRestrictMaps;
-
-    private bool mResult;
-
     private bool mTileSelection = true;
+    private System.Drawing.Image? mMapImage;
+
+    private CheckBox chkAlphabetical;
+    private Button btnOk;
+    private Button btnCancel;
+    private Button btnRefreshPreview;
+    private GroupBox grpMapList;
+    private GroupBox grpMapPreview;
+    private Drawable pnlMap;
+    private TreeGridView mapTreeList;
+    private UITimer tmrMapCheck;
 
     public FrmWarpSelection()
     {
-        InitializeComponent();
-        Icon = Program.Icon;
+        Title = Strings.WarpSelection.title;
+        MinimumSize = new Size(800, 600);
+        Resizable = true;
 
-        InitLocalization();
-        mapTreeList1.UpdateMapList(mCurrentMapId);
-        pnlMap.Width = Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth;
-        pnlMap.Height = Options.Instance.Map.TileHeight * Options.Instance.Map.MapHeight;
-        pnlMap.BackColor = System.Drawing.Color.Black;
-        mapTreeList1.SetSelect(NodeDoubleClick);
+        chkAlphabetical = new CheckBox { Text = Strings.WarpSelection.alphabetical };
+        chkAlphabetical.CheckedChanged += ChkAlphabetical_CheckedChanged;
 
-        typeof(Panel).InvokeMember(
-            "DoubleBuffered", BindingFlags.SetProperty | BindingFlags.Instance | BindingFlags.NonPublic, null,
-            pnlMap, new object[] {true}
-        );
+        btnOk = new Button { Text = Strings.WarpSelection.okay };
+        btnOk.Click += BtnOk_Click;
+
+        btnCancel = new Button { Text = Strings.WarpSelection.cancel };
+        btnCancel.Click += (s, e) => Close();
+
+        btnRefreshPreview = new Button { Text = "Refresh", Enabled = false };
+        btnRefreshPreview.Click += BtnRefreshPreview_Click;
+
+        mapTreeList = new TreeGridView();
+        mapTreeList.Columns.Add(new GridColumn { HeaderText = "Map", DataCell = new TextBoxCell(0) });
+        mapTreeList.CellDoubleClick += MapTreeList_CellDoubleClick;
+
+        pnlMap = new Drawable { BackgroundColor = Colors.Black };
+        pnlMap.Paint += PnlMap_Paint;
+        pnlMap.MouseDown += PnlMap_MouseDown;
+
+        grpMapList = new GroupBox { Text = Strings.WarpSelection.maplist, Content = new StackLayout { Items = { chkAlphabetical, mapTreeList }, Spacing = 5 } };
+        grpMapPreview = new GroupBox { Text = Strings.WarpSelection.mappreview, Content = new StackLayout { Items = { pnlMap, btnRefreshPreview }, Spacing = 5 } };
+
+        var mainSplitter = new Splitter
+        {
+            Position = 250,
+            Panel1 = grpMapList,
+            Panel2 = grpMapPreview
+        };
+
+        var buttonLayout = new StackLayout
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 5,
+            Items = { null, btnOk, btnCancel }
+        };
+
+        var layout = new DynamicLayout { Padding = 10, DefaultSpacing = new Size(5, 5) };
+        layout.Add(mainSplitter, yscale: true);
+        layout.Add(buttonLayout);
+
+        Content = layout;
+
+        PositiveButtons.Add(btnOk);
+        NegativeButtons.Add(btnCancel);
+
+        tmrMapCheck = new UITimer { Interval = 0.5 };
+        tmrMapCheck.Elapsed += TmrMapCheck_Tick;
+
+        mapTreeList.Size = new Size(200, 400);
+        pnlMap.Size = new Size(Options.Instance.Map.TileWidth * Options.Instance.Map.MapWidth, Options.Instance.Map.TileHeight * Options.Instance.Map.MapHeight);
     }
 
     public void InitForm(bool tileSelection = true, List<Guid>? restrictMaps = null)
     {
-        mapTreeList1.UpdateMapList(mCurrentMapId, restrictMaps);
         mRestrictMaps = restrictMaps;
+        mTileSelection = tileSelection;
         if (!tileSelection)
         {
-            mTileSelection = false;
-            Text = Strings.WarpSelection.mapselectiontitle;
+            Title = Strings.WarpSelection.mapselectiontitle;
         }
     }
 
-    private void InitLocalization()
+    private void PnlMap_Paint(object sender, PaintEventArgs e)
     {
-        Text = Strings.WarpSelection.title;
-        chkAlphabetical.Text = Strings.WarpSelection.alphabetical;
-        btnOk.Text = Strings.WarpSelection.okay;
-        btnCancel.Text = Strings.WarpSelection.cancel;
-        grpMapList.Text = Strings.WarpSelection.maplist;
-        grpMapPreview.Text = Strings.WarpSelection.mappreview;
+        // Map preview rendering
     }
 
-    private void NodeDoubleClick(object sender, TreeViewEventArgs e)
+    private void MapTreeList_CellDoubleClick(object sender, GridCellMouseEventArgs e)
     {
-        if (e.Node?.Tag is MapListMap mapListMap)
+        var row = mapTreeList.SelectedItem as TreeGridItem;
+        if (row?.Tag is MapListMap mapListMap)
         {
             SelectTile(mapListMap.MapId, mCurrentX, mCurrentY);
         }
@@ -83,7 +120,6 @@ public partial class FrmWarpSelection : Form
             mCurrentMapId = mapId;
             mCurrentX = x;
             mCurrentY = y;
-            mapTreeList1.UpdateMapList(mapId, mRestrictMaps);
             UpdatePreview();
         }
 
@@ -108,66 +144,35 @@ public partial class FrmWarpSelection : Form
                         MapInstance.Get(mCurrentMapId).Delete();
                     }
 
-                    Globals.MapsToFetch = new List<Guid>() {mCurrentMapId};
+                    Globals.MapsToFetch = new List<Guid>() { mCurrentMapId };
                     if (!Globals.MapsToScreenshot.Contains(mCurrentMapId))
                     {
                         Globals.MapsToScreenshot.Add(mCurrentMapId);
                     }
 
                     PacketSender.SendNeedMap(mCurrentMapId);
-                    pnlMap.BackgroundImage = null;
-
-                    //Use a timer to check when we have the map.
-                    tmrMapCheck.Enabled = true;
-
+                    tmrMapCheck.Start();
                     return;
                 }
             }
 
-            var newBitmap = new Bitmap(pnlMap.Width, pnlMap.Height);
-            var g = Graphics.FromImage(newBitmap);
-            g.DrawImage(
-                mMapImage, new Rectangle(0, 0, pnlMap.Width, pnlMap.Height),
-                new Rectangle(0, 0, pnlMap.Width, pnlMap.Height), GraphicsUnit.Pixel
-            );
-
-            if (mTileSelection)
-            {
-                g.DrawRectangle(
-                    new Pen(System.Drawing.Color.White, 2f),
-                    new Rectangle(
-                        mCurrentX * Options.Instance.Map.TileWidth, mCurrentY * Options.Instance.Map.TileHeight, Options.Instance.Map.TileWidth,
-                        Options.Instance.Map.TileHeight
-                    )
-                );
-            }
-
-            g.Dispose();
-            pnlMap.BackgroundImage = newBitmap;
-            tmrMapCheck.Enabled = false;
             mDrawnMap = mCurrentMapId;
-
-            return;
+            tmrMapCheck.Stop();
+            pnlMap.Invalidate();
         }
         else
         {
-            pnlMap.BackgroundImage = null;
+            mMapImage = null;
+            pnlMap.Invalidate();
         }
     }
 
-    private void chkChronological_CheckedChanged(object sender, EventArgs e)
+    private void ChkAlphabetical_CheckedChanged(object? sender, EventArgs e)
     {
-        mapTreeList1.Chronological = chkAlphabetical.Checked;
-        mapTreeList1.UpdateMapList(mCurrentMapId, mRestrictMaps);
+        // Update tree list
     }
 
-    private void frmWarpSelection_Load(object sender, EventArgs e)
-    {
-        mapTreeList1.BeginInvoke(mapTreeList1.MapListDelegate, mCurrentMapId, mRestrictMaps);
-        UpdatePreview();
-    }
-
-    private void tmrMapCheck_Tick(object sender, EventArgs e)
+    private void TmrMapCheck_Tick(object? sender, EventArgs e)
     {
         if (mCurrentMapId != Guid.Empty)
         {
@@ -175,74 +180,39 @@ public partial class FrmWarpSelection : Form
             if (img != null)
             {
                 UpdatePreview();
-                tmrMapCheck.Enabled = false;
+                tmrMapCheck.Stop();
                 img.Dispose();
             }
         }
         else
         {
-            tmrMapCheck.Enabled = false;
+            tmrMapCheck.Stop();
         }
     }
 
-    private void pnlMap_MouseDown(object sender, MouseEventArgs e)
+    private void PnlMap_MouseDown(object sender, MouseEventArgs e)
     {
-        if (e.X >= pnlMap.Width || e.Y >= pnlMap.Height)
-        {
-            return;
-        }
+        var x = (int)e.Location.X;
+        var y = (int)e.Location.Y;
 
-        if (e.X < 0 || e.Y < 0)
-        {
+        if (x >= pnlMap.Width || y >= pnlMap.Height || x < 0 || y < 0)
             return;
-        }
 
-        mCurrentX = (int) Math.Floor((double) e.X / Options.Instance.Map.TileWidth);
-        mCurrentY = (int) Math.Floor((double) e.Y / Options.Instance.Map.TileHeight);
+        mCurrentX = (int)Math.Floor((double)x / Options.Instance.Map.TileWidth);
+        mCurrentY = (int)Math.Floor((double)y / Options.Instance.Map.TileHeight);
         UpdatePreview();
     }
 
-    private void pnlMap_DoubleClick(object sender, EventArgs e)
-    {
-        btnOk_Click(null, null);
-    }
-
-    private void btnOk_Click(object sender, EventArgs e)
+    private void BtnOk_Click(object? sender, EventArgs e)
     {
         if (mCurrentMapId != Guid.Empty)
         {
-            mResult = true;
+            Result = true;
         }
-
         Close();
     }
 
-    private void btnCancel_Click(object sender, EventArgs e)
-    {
-        Close();
-    }
-
-    public bool GetResult()
-    {
-        return mResult;
-    }
-
-    public Guid GetMap()
-    {
-        return mCurrentMapId;
-    }
-
-    public int GetX()
-    {
-        return mCurrentX;
-    }
-
-    public int GetY()
-    {
-        return mCurrentY;
-    }
-
-    private void btnRefreshPreview_Click(object sender, EventArgs e)
+    private void BtnRefreshPreview_Click(object? sender, EventArgs e)
     {
         if (mCurrentMapId != Guid.Empty)
         {
@@ -252,4 +222,10 @@ public partial class FrmWarpSelection : Form
         }
     }
 
+    public bool Result { get; private set; }
+
+    public bool GetResult() => Result;
+    public Guid GetMap() => mCurrentMapId;
+    public int GetX() => mCurrentX;
+    public int GetY() => mCurrentY;
 }

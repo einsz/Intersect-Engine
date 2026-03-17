@@ -1,12 +1,12 @@
+using Eto.Drawing;
+using Eto.Forms;
 using Intersect.Editor.Core;
 using Intersect.Editor.Localization;
 
 namespace Intersect.Editor.Forms;
 
-
 public partial class FrmProgress : Form
 {
-
     private int mProgressVal;
 
     private bool mShouldClose;
@@ -15,10 +15,58 @@ public partial class FrmProgress : Form
 
     private string mStatusText;
 
+    private readonly Label lblStatus;
+
+    private readonly ProgressBar progressBar;
+
+    private readonly Button btnCancel;
+
+    private readonly UITimer tmrUpdater;
+
     public FrmProgress()
     {
-        InitializeComponent();
-        Icon = Program.Icon;
+        lblStatus = new Label
+        {
+            Text = "Doing Work: 0%",
+            TextColor = Colors.Gainsboro,
+        };
+
+        progressBar = new ProgressBar
+        {
+            MinValue = 0,
+            MaxValue = 100,
+        };
+
+        btnCancel = new Button
+        {
+            Text = "Cancel",
+            Visible = false,
+        };
+
+        var layout = new DynamicLayout
+        {
+            Padding = new Padding(13, 13, 13, 13),
+            DefaultSpacing = new Size(3, 3),
+        };
+
+        layout.AddRow(lblStatus);
+        layout.AddRow(progressBar);
+        layout.AddRow(null, btnCancel);
+
+        Content = layout;
+
+        WindowStyle = WindowStyle.Utility;
+        Resizable = false;
+        MinimumSize = new Size(284, 100);
+        Size = new Size(300, 110);
+        Title = "Doing Work";
+
+        tmrUpdater = new UITimer
+        {
+            Interval = 0.05,
+        };
+        tmrUpdater.Elapsed += TmrUpdater_Tick;
+        tmrUpdater.Start();
 
         InitLocalization();
     }
@@ -30,7 +78,7 @@ public partial class FrmProgress : Form
 
     public void SetTitle(string title)
     {
-        Text = title;
+        Title = title;
     }
 
     public void SetProgress(string label, int progress, bool showCancel)
@@ -39,17 +87,14 @@ public partial class FrmProgress : Form
         if (progress < 0)
         {
             mProgressVal = 0;
-            progressBar.Style = ProgressBarStyle.Marquee;
         }
         else
         {
             mProgressVal = progress;
-            progressBar.Style = ProgressBarStyle.Blocks;
         }
 
         mShowCancelBtn = showCancel;
-        tmrUpdater_Tick(null, null);
-        Application.DoEvents();
+        UpdateUI();
     }
 
     public void NotifyClose()
@@ -57,22 +102,25 @@ public partial class FrmProgress : Form
         mShouldClose = true;
     }
 
-    private void tmrUpdater_Tick(object sender, EventArgs e)
+    private void TmrUpdater_Tick(object sender, EventArgs e)
     {
-        if (!IsHandleCreated)
+        UpdateUI();
+    }
+
+    private void UpdateUI()
+    {
+        if (!Visible)
         {
             return;
         }
 
-        if (!InvokeRequired)
+        lblStatus.Text = mStatusText ?? string.Empty;
+        progressBar.Value = Math.Min(100, Math.Max(0, mProgressVal));
+        btnCancel.Visible = mShowCancelBtn;
+
+        if (mShouldClose)
         {
-            lblStatus.Text = mStatusText;
-            progressBar.Value = Math.Min(100, mProgressVal);
-            btnCancel.Visible = mShowCancelBtn;
-            if (mShouldClose)
-            {
-                Close();
-            }
+            Close();
         }
     }
 }
